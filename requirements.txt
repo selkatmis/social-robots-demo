@@ -1,0 +1,10 @@
+./wheels/robond_asr-0.1.0+minified-py3-none-any.whl
+./wheels/robond_core-0.1.0+minified-py3-none-any.whl
+./wheels/robond_robot-0.1.0+minified-py3-none-any.whl
+
+python-dotenv
+mistralai>=2
+sentence-transformers
+requests
+flask>=2,<3
+websocket-client
