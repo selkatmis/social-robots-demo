@@ -8,3 +8,6 @@ sentence-transformers
 requests
 flask>=2,<3
 websocket-client
+furhat-realtime-api
+sounddevice
+webrtcvad-wheels
