@@ -1,6 +1,6 @@
+
 import logging
 import os
-import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -10,36 +10,118 @@ from openai import OpenAI
 logger = logging.getLogger(__name__)
 
 MODEL = "ministral-8b-2512"
-STT_MODEL = "voxtral-mini-latest"
 
 class LLM:
-    def __init__(self) -> None:
-        load_dotenv(Path(__file__).parent / ".env", override=True)
-        api_key = os.getenv("MISTRAL_API_KEY")  
+    def __init__(
+        self,
+        system_prompt="Antwoord altijd in het Nederlands.",
+        env_override=True,
+    ) -> None:
+        # Load .env from the same directory as this file.
+        env_path = Path(__file__).resolve().parent / ".env"
+        load_dotenv(dotenv_path=env_path, override=env_override)
 
-        if not api_key:
-            raise RuntimeError("MISTRAL_API_KEY is missing from .env")
+        self.system_prompt = system_prompt
+        self.last_provider = None
 
-        self.client = Mistral(api_key=api_key)
+        # Primary provider: SURF
+        surf_url = os.getenv("SURF_BASE_URL")
+        surf_key = os.getenv("SURF_API_KEY")
+        self.surf_model = os.getenv("SURF_MODEL")
+        self.surf = None
+
+        if surf_url and surf_key and self.surf_model:
+            self.surf = OpenAI(
+                base_url=surf_url,
+                api_key=surf_key,
+                timeout=5.0,
+                max_retries=0,
+            )
+
+        # Backup provider: Mistral
+        mistral_key = os.getenv("MISTRAL_API_KEY")
+
+        self.client = (
+            Mistral(api_key=mistral_key)
+            if mistral_key else None
+        )
         self.model = MODEL
 
-    def prompt(self, text, max_tokens=100, temperature=0.3):
-        return self.chat([{"role": "user", "content": text}], max_tokens, temperature)
+        # Aliases for compatibility with friend's version
+        self.mistral = self.client
+        self.mistral_model = self.model
 
-    def chat(self, messages, max_tokens=100, temperature=0.3):
-        """Send a whole conversation (list of {"role", "content"} dicts) and return the reply."""
-        response = self.client.chat.complete(
-            model=self.model,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,)
-        return response.choices[0].message.content.strip()
+        if self.surf is None and self.mistral is None:
+            raise RuntimeError(
+                "No LLM configured. Set SURF credentials "
+                "and/or MISTRAL_API_KEY in shared/.env"
+            )
 
-    def transcribe(self, wav_bytes, language="nl", hints=None):
-        """Speech to text with Mistral's Voxtral. `hints` are words it should expect, e.g. names."""
-        response = self.client.audio.transcriptions.complete(
-            model=STT_MODEL,
-            file={"file_name": "audio.wav", "content": wav_bytes},
-            language=language,
-            context_bias=hints,)
-        return response.text.strip()
+    def prompt(
+        self,
+        text,
+        max_tokens=100,
+        temperature=0.3,
+        fallback=None,
+    ):
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": text},
+        ]
+
+        self.last_provider = None
+
+        # Attempt SURF first
+        if self.surf is not None:
+            try:
+                response = self.surf.chat.completions.create(
+                    model=self.surf_model,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+
+                answer = response.choices[0].message.content
+
+                if not isinstance(answer, str) or not answer.strip():
+                    raise ValueError("SURF returned no text")
+
+                self.last_provider = "SURF"
+                return answer.strip()
+
+            except Exception as error:
+                logger.warning(
+                    "SURF unavailable (%s); trying Mistral",
+                    type(error).__name__,
+                )
+
+        # Fall back to Mistral
+        if self.mistral is not None:
+            try:
+                response = self.mistral.chat.complete(
+                    model=self.mistral_model,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+
+                answer = response.choices[0].message.content
+
+                if not isinstance(answer, str) or not answer.strip():
+                    raise ValueError("Mistral returned no text")
+
+                self.last_provider = "Mistral"
+                return answer.strip()
+
+            except Exception as error:
+                logger.error(
+                    "Mistral unavailable (%s)",
+                    type(error).__name__,
+                )
+
+        if fallback is not None:
+            return fallback
+
+        raise RuntimeError(
+            "Both LLM providers are unavailable"
+        )
