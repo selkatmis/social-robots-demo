@@ -1,0 +1,8 @@
+# Robot network configuration
+
+QT_IP = "10.96.21.245"
+ARI_IP = "10.96.21.217"
+FURHAT_IP = "10.96.21.45"
+
+REMOTE_PORT = 7342
+FURHAT_PORT = 9000

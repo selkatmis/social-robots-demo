@@ -1,26 +1,85 @@
+import logging
 import os
-import time
 
 from dotenv import load_dotenv
 from mistralai.client import Mistral
+from openai import OpenAI
 
-MODEL = "ministral-8b-2512"
+logger = logging.getLogger(__name__)
+
 
 class LLM:
-    def __init__(self) -> None:
-        load_dotenv(override=True)
-        api_key = os.getenv("MISTRAL_API_KEY")  
+    def __init__(self, system_prompt="Antwoord altijd in het Nederlands."):
+        # python-dotenv finds the .env beside this Python module.
+        load_dotenv()
 
-        if not api_key:
-            raise RuntimeError("MISTRAL_API_KEY is missing from .env")
+        self.system_prompt = system_prompt
+        self.last_provider = None
 
-        self.client = Mistral(api_key=api_key)
-        self.model = MODEL
+        # Primary provider: SURF (requires an OpenAI-compatible endpoint).
+        surf_url = os.getenv("SURF_BASE_URL")
+        surf_key = os.getenv("SURF_API_KEY")
+        self.surf_model = os.getenv("SURF_MODEL")
+        self.surf = None
 
-    def prompt(self, text, max_tokens=100, temperature=0.3):
-        response = self.client.chat.complete(
-            model=self.model,
-            messages=[{"role": "user", "content": text}],
-            max_tokens=max_tokens,
-            temperature=temperature,)
-        return response.choices[0].message.content.strip()
+        if surf_url and surf_key and self.surf_model:
+            self.surf = OpenAI(
+                base_url=surf_url,
+                api_key=surf_key,
+                timeout=5.0,
+                max_retries=0,
+            )
+
+        # Backup provider: Mistral.
+        mistral_key = os.getenv("MISTRAL_API_KEY")
+        self.mistral = Mistral(api_key=mistral_key) if mistral_key else None
+        self.mistral_model = "ministral-8b-2512"
+
+        if self.surf is None and self.mistral is None:
+            raise RuntimeError(
+                "No LLM configured: set SURF_BASE_URL, SURF_API_KEY, SURF_MODEL "
+                "and/or MISTRAL_API_KEY in shared/.env"
+            )
+
+    def prompt(self, text, max_tokens=100, temperature=0.3, fallback=None):
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": text},
+        ]
+        self.last_provider = None
+
+        if self.surf is not None:
+            try:
+                response = self.surf.chat.completions.create(
+                    model=self.surf_model,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+                answer = response.choices[0].message.content
+                if not isinstance(answer, str) or not answer.strip():
+                    raise ValueError("SURF returned no text")
+                self.last_provider = "SURF"
+                return answer.strip()
+            except Exception as error:
+                logger.warning("SURF unavailable (%s); trying Mistral", type(error).__name__)
+
+        if self.mistral is not None:
+            try:
+                response = self.mistral.chat.complete(
+                    model=self.mistral_model,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+                answer = response.choices[0].message.content
+                if not isinstance(answer, str) or not answer.strip():
+                    raise ValueError("Mistral returned no text")
+                self.last_provider = "Mistral"
+                return answer.strip()
+            except Exception as error:
+                logger.error("Mistral unavailable (%s)", type(error).__name__)
+
+        if fallback is not None:
+            return fallback
+        raise RuntimeError("Both LLM providers are unavailable")
