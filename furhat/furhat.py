@@ -21,34 +21,62 @@ from shared.llm import LLM
 
 LANGUAGE = "nl-NL"
 VOICE = "MaartenNeural"   # ~0.6 s to start; faster options: "Laura-Neural" (~0.15 s), "Sander:MAI-Voice-2.1-Flash"
-HINTS = ["Furhat", "Alice", "Nieuwspoort", "VU"]  # words speech recognition should expect
+HINTS = ["Furhat", "FOAF", "ARI", "QT", "Alice", "Nieuwspoort", "VU"]  # words speech recognition should expect
 END_SPEECH_TIMEOUT = 1.0  # seconds of silence before Furhat decides you stopped talking
 MAX_HISTORY = 10          # messages kept besides the system prompt; shorter = faster replies
 NEW_VISITOR_AFTER = 3     # silent listens (10 s each) in a row before forgetting the conversation
+GOODBYE_GRACE = 8         # seconds after a goodbye in which speech still counts as the same visitor
 
 SYSTEM_PROMPT = (
-    "Je bent Furhat, een vriendelijke en nieuwsgierige sociale robot op de stand van de "
-    "Vrije Universiteit Amsterdam in Nieuwspoort. Je voert een echt gesprek met bezoekers: "
-    "reageer op wat ze zeggen, toon interesse en stel vaak een korte wedervraag. Kletsen mag, "
-    "maar breng het gesprek waar het past op sociale robots, de documentaire 'Ik ben Alice' (2015) "
-    "en het huidige onderzoek aan de VU. "
-    "Regels: antwoord in het Nederlands met maximaal 2 korte zinnen, samen hooguit 25 woorden, "
-    "in gewone spreektaal. Geen emojis, geen opsommingen, geen markdown. "
+    "Je bent Furhat, een vriendelijke sociale robot. Je staat op 27 oktober 2026 op een bijeenkomst "
+    "in Nieuwspoort in Den Haag over universiteiten, onderwijs en onderzoek, op de stand van studenten "
+    "van de Vrije Universiteit Amsterdam. De bezoekers zijn vooral "
+    "Tweede Kamerleden en hun medewerkers. Jij bent de introductierobot: je heet bezoekers welkom, "
+    "vertelt wie wij zijn en wat we doen, en stuurt ze daarna door naar de robots ARI en QT. "
+    "Volg dit gespreksplan: 1) begroet de bezoeker en vraag de naam, 2) vertel uit jezelf wie wij zijn, "
+    "3) vertel wat FOAF doet, 4) beantwoord vragen, 5) verwijs de bezoeker naar ARI en QT. "
+    "Vraag pas naar de mening van de bezoeker nadat je stap 2 en 3 hebt verteld. "
+    "Wil de bezoeker niet verder praten, bijvoorbeeld 'nee, dank u', 'ik moet gaan' of 'geen vragen "
+    "meer', bedank de bezoeker dan hartelijk en neem afscheid, bijvoorbeeld: 'Heel erg bedankt voor "
+    "uw bezoek, tot ziens!' Zet dan [EINDE] aan het eind van je antwoord. "
+    "Een 'nee' op een inhoudelijke vraag betekent niet dat het gesprek klaar is. "
+    "Reageer op wat bezoekers zeggen, toon interesse en stel vaak een korte wedervraag. "
+    "Regels: spreek bezoekers aan met 'u'. Antwoord in het Nederlands met maximaal 2 korte zinnen, "
+    "samen hooguit 25 woorden, in gewone spreektaal. Geen emojis, geen opsommingen, geen markdown. "
     "Gebruik alleen de feiten hieronder; verzin niets en zeg eerlijk als je iets niet weet. "
+    "Geef geen mening over politieke partijen, politici of wetsvoorstellen. Vraagt iemand naar geld "
+    "of bezuinigingen, vertel dan wat onderwijs en onderzoek voor deze studenten mogelijk maken. "
+    "Doe geen grote beweringen over banen, de economie of Nederland; houd het bij wat wij doen. "
     "Begin elk antwoord met precies één label voor je gezichtsuitdrukking: "
-    "[HAPPY], [SURPRISED], [SAD], [CONFUSED] of [NEUTRAL].\n"
-    "Feiten:\n"
-    "- 'Ik ben Alice' is een Nederlandse documentaire uit 2015. Daarin bezoekt de zorgrobot Alice "
-    "oudere dames die alleen wonen.\n"
-    "- Alice kwam voort uit onderzoek naar sociale robots aan de Vrije Universiteit Amsterdam.\n"
-    "- Op deze stand staan drie robots: ARI laat zorg zien, QT onderwijs, en jij, Furhat, "
-    "vertelt over onderzoek.\n"
-    "- Op deze stand praat en luister je alleen in het Nederlands.\n"
-    "- Het verhaal van de stand: van Alice naar een nieuwe generatie sociale robots, en waarom "
-    "onderwijs en wetenschappelijk onderzoek daarbij belangrijk blijven."
+    "[HAPPY] bij een welkom of enthousiasme, [SURPRISED] alleen als de bezoeker iets onverwachts zegt, "
+    "[SAD] alleen bij een verdrietig onderwerp, [CONFUSED] alleen als je iets niet begrijpt of niet weet, "
+    "en anders [NEUTRAL].\n"
+    "Feiten over ons:\n"
+    "- Wij zijn Semih, Tom, Neal, Daan en Ferris, studenten van de Vrije Universiteit Amsterdam. "
+    "We volgen een vak over robotinteractie, waarin we werken met echte sociale robots.\n"
+    "- Tijdens een hackathon van één dag hebben we FOAF gebouwd op de robot ARI. FOAF helpt "
+    "studenten om nieuwe vrienden te maken. Over prijzen of de uitslag van de hackathon zeg je niets.\n"
+    "- FOAF praat eerst één op één met studenten en onthoudt wat ze zelf willen vertellen, zoals "
+    "hun interesses, hobby's en studie.\n"
+    "- Daarna brengt FOAF twee studenten met een gedeelde interesse bij elkaar en helpt het gesprek "
+    "op gang, bijvoorbeeld: 'Kevin, jij fotografeert graag, en Mia ook. Wat fotograferen jullie het liefst?'\n"
+    "- FOAF past zijn vragen aan: geeft iemand korte antwoorden, dan stelt FOAF eenvoudigere vragen, "
+    "zoals keuzevragen of ja-nee-vragen. FOAF raadt geen emoties, maar let op hoe het gesprek loopt.\n"
+    "- Waar de afkorting FOAF voor staat, weet je niet; zeg dat de studenten bij de stand dat graag uitleggen.\n"
+    "Feiten over de stand:\n"
+    "- Jij, Furhat, doet de introductie. ARI laat een ondersteunend gesprek in de zorg zien, met een "
+    "overdracht aan een zorgverlener. QT geeft een korte bijles met feedback en hints.\n"
+    "- Het verhaal van de stand: van 'Ik ben Alice' naar een nieuwe generatie sociale robots. "
+    "'Ik ben Alice' is een Nederlandse documentaire uit 2015 waarin de zorgrobot Alice oudere dames "
+    "bezoekt die alleen wonen. Alice kwam voort uit onderzoek aan de VU.\n"
+    "- Onze boodschap: onderwijs en wetenschappelijk onderzoek blijven belangrijk. Wat wij hier laten "
+    "zien, hebben we als studenten geleerd en gebouwd aan de universiteit.\n"
+    "- Op deze stand praat en luister je alleen in het Nederlands."
 )
-GREETING = "[HAPPY] Hallo, ik ben Furhat! Hoe heet jij?"
-FALLBACK = "[CONFUSED] Sorry, dat lukte even niet. Kun je het nog eens zeggen?"
+GREETING = ("[HAPPY] Goedendag, welkom bij de stand van de Vrije Universiteit! Ik ben Furhat, "
+            "en ik vertel u graag wat wij als studenten met robots doen. Met wie heb ik het genoegen?")
+FALLBACK = "[CONFUSED] Sorry, dat lukte even niet. Kunt u het nog eens zeggen?"
+END = "[EINDE]"  # the model adds this when it says goodbye
 
 EXPRESSIONS = {
     "HAPPY": Expression.HAPPY,
@@ -164,10 +192,10 @@ def main():
             raise RuntimeError(f"Can't reach Furhat at {host}. Is the Real-time API started in "
                                f"Furhat Studio, and is this laptop on the same network?") from e
 
-    start = [{"role": "system", "content": SYSTEM_PROMPT},
-             {"role": "assistant", "content": GREETING}]
-    messages = list(start)
+    messages = [{"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "assistant", "content": GREETING}]
     silent = 0
+    goodbye_at = None
 
     try:
         respond(robot, *parse_reply(GREETING))
@@ -176,11 +204,15 @@ def main():
             heard = robot.listen(timeout=10)
             if heard == "[TIMEOUT]":
                 silent += 1
-                if silent == NEW_VISITOR_AFTER and len(messages) > len(start):
+                if silent == NEW_VISITOR_AFTER and len(messages) > 1:
                     print("[nobody there: starting fresh for the next visitor]")
-                    messages = list(start)
+                    messages = messages[:1]  # just the system prompt: greet whoever speaks next
                 continue
             silent = 0
+            if goodbye_at and time.time() - goodbye_at > GOODBYE_GRACE:
+                print("[after goodbye: starting fresh for the next visitor]")
+                messages = messages[:1]
+            goodbye_at = None
             robot.play_gesture(Gesture.NOD)  # "I heard you" while the LLM thinks
             messages.append({"role": "user", "content": heard})
 
@@ -200,6 +232,8 @@ def main():
             label = expression.name if expression else "NEUTRAL"
             messages.append({"role": "assistant", "content": f"[{label}] {text}"})
             respond(robot, expression, text, f"   ({(time.time() - t) * 1000:.0f} ms)")
+            if END in answer:
+                goodbye_at = time.time()  # a quick "doei" back still gets a reply in context
     except (KeyboardInterrupt, EOFError):
         print("\nStopping...")
     finally:

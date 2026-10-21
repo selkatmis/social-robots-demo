@@ -8,7 +8,7 @@ We are preparing three short demonstrations in **Dutch**:
 | --- | --- | --- |
 | **ARI** | Healthcare | A supportive conversation and an appropriate handover to a caregiver. |
 | **QT** | Education | A mini tutoring session with feedback and hints. |
-| **Furhat** | Research information | Questions about social robotics, the *Ik ben Alice* project, and current VU research. |
+| **Furhat** | Introduction | A welcome: who we are, our FOAF project on ARI, and where to go next (ARI and QT). |
 
 **Our story:** *Van Alice naar een nieuwe generatie sociale robots.* The stand connects the *Ik ben Alice* documentary (2015) to what current social robots can demonstrate, and to the continuing importance of education and scientific research.
 
