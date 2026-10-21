@@ -8,7 +8,7 @@ We are preparing three short demonstrations in **Dutch**:
 | --- | --- | --- |
 | **ARI** | Healthcare | A supportive conversation and an appropriate handover to a caregiver. |
 | **QT** | Education | A mini tutoring session with feedback and hints. |
-| **Furhat** | Research information | Questions about social robotics, the *Ik ben Alice* project, and current VU research. |
+| **Furhat** | Introduction | A welcome: who we are, our FOAF project on ARI, and where to go next (ARI and QT). |
 
 **Our story:** *Van Alice naar een nieuwe generatie sociale robots.* The stand connects the *Ik ben Alice* documentary (2015) to what current social robots can demonstrate, and to the continuing importance of education and scientific research.
 
@@ -86,3 +86,22 @@ python -m ari.llm_test
 python -m qt.llm_test
 python -m furhat.llm_test
 ```
+
+### Talking to Furhat
+
+1. Fill in `shared/.env`: `MISTRAL_API_KEY`, `FURHAT_HOST` (the robot's IP) and, only if one is set, `FURHAT_AUTH_KEY`.
+2. Open the robot's IP in a browser, click **Real-time API** and start it. Your laptop must be on the same network as the robot.
+3. From the **project root**, run:
+
+```powershell
+python -m furhat.furhat
+```
+
+Furhat greets you and then listens with its own microphone (Dutch). Press `Ctrl+C` to stop.
+
+No robot nearby? Only `MISTRAL_API_KEY` is needed for these:
+
+```powershell
+python -m furhat.furhat --mic    # talk with your laptop's microphone; the reply is spoken (macOS)
+python -m furhat.furhat --text   # type instead of talking
+``` The persona and rules are in `SYSTEM_PROMPT` at the top of `furhat/furhat.py`.
