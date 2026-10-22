@@ -71,29 +71,29 @@ class LLM:
 
         self.last_provider = None
 
-        # Attempt SURF first
-        if self.surf is not None:
-            try:
-                response = self.surf.chat.completions.create(
-                    model=self.surf_model,
-                    messages=messages,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                )
+        # # Attempt SURF first
+        # if self.surf is not None:
+        #     try:
+        #         response = self.surf.chat.completions.create(
+        #             model=self.surf_model,
+        #             messages=messages,
+        #             max_tokens=max_tokens,
+        #             temperature=temperature,
+        #         )
 
-                answer = response.choices[0].message.content
+        #         answer = response.choices[0].message.content
 
-                if not isinstance(answer, str) or not answer.strip():
-                    raise ValueError("SURF returned no text")
+        #         if not isinstance(answer, str) or not answer.strip():
+        #             raise ValueError("SURF returned no text")
 
-                self.last_provider = "SURF"
-                return answer.strip()
+        #         self.last_provider = "SURF"
+        #         return answer.strip()
 
-            except Exception as error:
-                logger.warning(
-                    "SURF unavailable (%s); trying Mistral",
-                    type(error).__name__,
-                )
+        #     except Exception as error:
+        #         logger.warning(
+        #             "SURF unavailable (%s); trying Mistral",
+        #             type(error).__name__,
+        #         )
 
         # Fall back to Mistral
         if self.mistral is not None:

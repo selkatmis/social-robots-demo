@@ -9,5 +9,8 @@ requests
 flask>=2,<3
 websocket-client
 furhat-realtime-api
+numpy>=1.24
 sounddevice
+silero-vad>=6,<7
+faster-whisper>=1.1,<2
 webrtcvad-wheels
