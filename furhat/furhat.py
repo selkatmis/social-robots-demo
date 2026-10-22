@@ -175,7 +175,7 @@ def respond(robot, expression, text, note=""):
 def main():
     load_dotenv(Path(__file__).resolve().parent.parent / "shared" / ".env", override=True)
 
-    llm = LLM()
+    llm = LLM(system_prompt=SYSTEM_PROMPT)
     if "--mic" in sys.argv or "--text" in sys.argv:
         robot = LaptopRobot(llm, typing="--text" in sys.argv, hints=HINTS,
                             end_silence=END_SPEECH_TIMEOUT)
@@ -218,7 +218,15 @@ def main():
 
             t = time.time()
             try:
-                answer = llm.chat(messages[:1] + messages[1:][-MAX_HISTORY:], max_tokens=80)
+                history = "\n".join(
+                    f"{'Bezoeker' if msg['role'] == 'user' else 'Furhat'}: {msg['content']}"
+                    for msg in messages[1:][-MAX_HISTORY:]
+                )
+
+                answer = llm.prompt(
+                    f"Ga verder met dit gesprek:\n{history}\nFurhat:",
+                    max_tokens=80,
+                )
             except Exception as e:
                 print(f"[llm error] {e}")
                 messages.pop()

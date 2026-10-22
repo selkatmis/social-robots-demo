@@ -26,8 +26,8 @@ def main():
 
     gestures = robot.get_available_gestures()
     print(gestures)
-    robot.set_expression(Expression.EYES_HEARTS)
-
+    robot.set_expression(Expression.HAPPY)
+    
     print("Expressions:", list(Expression))
 
     print("Facial methods:", [
