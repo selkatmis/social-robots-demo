@@ -1,12 +1,11 @@
 from shared.llm import LLM
+import qt.prompts as template
 
 llm = LLM()
 
-persona = "Je bent een sociale robot genaamd QT voor ondersteuning."
-rules = "Regels: Antwoord met 1 zin. Geen emojis. Geen vragen. Verzin niet nieuwe dingen."
+answer = llm.prompt(f"{template.INSTRUCTIONS}, {template.CHOICE_CLASSIFIER_1},\
+Kind zegt:'Doe maar die laatste'")
 
-answer = llm.prompt("Geef een voorbeeld met pizza met een korte antwoord.")
 print(answer)
 
-persona_answer = llm.prompt(f"{persona}, wat is je naam?\n\n{rules}")
-print(persona_answer)
+answer = llm.prompt(f"")

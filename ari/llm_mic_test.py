@@ -1,177 +1,51 @@
-from __future__ import annotations
-
 import argparse
-import os
 import queue
-import threading
 import time
-from datetime import datetime
-from typing import Any, Optional, Union
 
-from shared.mic import ContinuousMic, ContinuousMicError, MicEvent, MicEventType
+from robond.core.listener_backend import ListenerBackend
+from robond.robot.remote import RemoteRobotInterface
 
+from shared.config import ARI_IP, REMOTE_PORT
+from shared.llm import LLM
+from shared.mic import ContinuousMic, ContinuousMicError, MicEventType
 
-class Console:
-    def __init__(self, debug: bool) -> None:
-        self.debug = debug
-        self._lock = threading.Lock()
+COOLDOWN_SECONDS = 0.4
 
-    def write(self, label: str, message: str, *, debug_only: bool = False) -> None:
-        if debug_only and not self.debug:
-            return
-        prefix = f"{datetime.now().strftime('%H:%M:%S.%f')[:-3]} " if self.debug else ""
-        with self._lock:
-            print(f"{prefix}[{label}] {message}", flush=True)
+class TestListener(ListenerBackend):
+    """RoboBOND listener placeholder; input comes from ContinuousMic."""
+
+    def listen(self, timeout=10, silence_timeout=None):
+        return "[TIMEOUT]"
 
 
-def format_status(robot_speaking: bool) -> str:
-    if robot_speaking:
-        return "Robot: SPEAKING (simulation) | Microphone: STILL LISTENING"
-    return "Robot: SILENT (simulation) | Microphone: LISTENING"
-
-
-class LLMWorker:
-    def __init__(self, console: Console, enabled: bool, llm: Any = None) -> None:
-        self.console = console
-        self.enabled = enabled
-        self._queue: queue.Queue[Optional[str]] = queue.Queue(maxsize=4)
-        self._thread: Optional[threading.Thread] = None
-        self._llm = llm
-        self._state_lock = threading.Lock()
-        self._stopping = threading.Event()
-
-        if enabled and self._llm is None:
-            try:
-                from shared.llm import LLM
-
-                self._llm = LLM()
-            except Exception as error:
-                self.enabled = False
-                self.console.write(
-                    "LLM",
-                    f"Disabled ({error}). Microphone testing continues; "
-                    "use --no-llm to suppress this.",
-                )
-
-    def start(self) -> None:
-        with self._state_lock:
-            if not self.enabled or self._stopping.is_set():
-                return
-            if self._thread is not None and self._thread.is_alive():
-                return
-            self._thread = threading.Thread(target=self._run, name="ari-llm", daemon=True)
-            self._thread.start()
-
-    def submit(self, text: str) -> bool:
-        if not text:
-            return False
-        with self._state_lock:
-            if not self.enabled or self._stopping.is_set():
-                return False
-            try:
-                self._queue.put_nowait(text)
-            except queue.Full:
-                self.console.write("LLM", "Request queue full; dropping this turn.")
-                return False
-        return True
-
-    def begin_shutdown(self) -> None:
-        with self._state_lock:
-            self._stopping.set()
-        while True:
-            try:
-                self._queue.get_nowait()
-            except queue.Empty:
-                return
-
-    def stop(self, timeout: float = 2.0) -> None:
-        if not self._stopping.is_set():
-            self.begin_shutdown()
-        with self._state_lock:
-            thread = self._thread
-        if thread is None or not thread.is_alive():
-            return
-        self._queue.put_nowait(None)
-        thread.join(timeout=timeout)
-
-    def _run(self) -> None:
-        while True:
-            text = self._queue.get()
-            if text is None:
-                return
-            with self._state_lock:
-                if self._stopping.is_set():
-                    return
-                self.console.write("LLM", "Generating response...", debug_only=True)
-            started = time.monotonic()
-            try:
-                answer = self._llm.prompt(text)
-            except Exception as error:
-                with self._state_lock:
-                    if self._stopping.is_set():
-                        return
-                    self.console.write("LLM ERROR", str(error))
-                continue
-            latency_ms = (time.monotonic() - started) * 1000
-            with self._state_lock:
-                if self._stopping.is_set():
-                    return
-                self.console.write("LLM", str(answer))
-                self.console.write(
-                    "METRIC",
-                    f"LLM response {latency_ms:.0f} ms",
-                    debug_only=True,
-                )
-
-
-def parse_device(value: str) -> Union[int, str]:
+def parse_device(value):
     try:
         return int(value)
     except ValueError:
         return value
 
 
-def build_parser() -> argparse.ArgumentParser:
+def parse_args():
     parser = argparse.ArgumentParser(
-        description="Continuously transcribe Dutch microphone speech without a robot."
+        description="Turn-based Dutch conversation with ARI."
     )
-    parser.add_argument("--list-devices", action="store_true", help="List microphones and exit")
-    parser.add_argument("--device", type=parse_device, help="Input device index or name")
-    parser.add_argument("--model", default="small", help="Faster-Whisper model (default: small)")
-    parser.add_argument("--asr-device", default="cpu", help="Faster-Whisper device (default: cpu)")
-    parser.add_argument("--compute-type", default="int8", help="CTranslate2 compute type")
-    parser.add_argument("--vad", choices=("silero", "webrtc"), default="silero")
-    partials = parser.add_mutually_exclusive_group()
-    partials.add_argument(
-        "--partials",
-        dest="partials",
-        action="store_true",
-        help="Enable provisional partial transcripts",
-    )
-    partials.add_argument(
-        "--no-partials",
-        dest="partials",
-        action="store_false",
-        help="Disable partial transcripts (default; kept for compatibility)",
-    )
-    parser.set_defaults(partials=False)
+    parser.add_argument("--host", default=ARI_IP, help="ARI RoboBOND proxy host")
+    parser.add_argument("--port", type=int, default=REMOTE_PORT)
+    parser.add_argument("--language", default="nl_NL", help="ARI TTS language")
     parser.add_argument(
-        "--partial-interval",
-        type=float,
-        default=2.0,
-        help="Seconds between partial transcripts",
+        "--device",
+        type=parse_device,
+        help="Krisp/NVIDIA Broadcast input index or name",
     )
-    parser.add_argument("--no-llm", action="store_true", help="Do not call shared.llm.LLM")
-    parser.add_argument("--debug", action="store_true", help="Show timestamps and timing details")
     parser.add_argument(
-        "--robot-speaking",
+        "--list-devices",
         action="store_true",
-        help="Start with simulated robot-speaking state enabled",
+        help="list Windows input devices and exit",
     )
-    return parser
+    return parser.parse_args()
 
 
-def print_devices() -> None:
+def print_devices():
     devices = ContinuousMic.list_microphones()
     if not devices:
         print("No input devices found.")
@@ -184,168 +58,124 @@ def print_devices() -> None:
         )
 
 
-def get_key() -> Optional[str]:
-    if os.name != "nt":
-        return None
-    import msvcrt
+def microphone_description(device):
+    try:
+        import sounddevice as sd
 
-    if not msvcrt.kbhit():
-        return None
-    return msvcrt.getwch().lower()
+        info = sd.query_devices(device, "input")
+        selection = sd.default.device[0] if device is None else device
+        return f"{info['name']} (device {selection})"
+    except Exception as error:
+        selection = "Windows default" if device is None else device
+        return f"{selection} (name unavailable: {error})"
 
 
-def main() -> int:
-    args = build_parser().parse_args()
-    if args.list_devices:
+def drain_events(turn_events):
+    while True:
         try:
-            print_devices()
-        except ContinuousMicError as error:
-            print(f"[MIC ERROR] {error}")
-            return 1
-        return 0
+            turn_events.get_nowait()
+        except queue.Empty:
+            return
 
-    console = Console(args.debug)
-    llm_worker = LLMWorker(console, enabled=not args.no_llm)
-    shutdown_started = threading.Event()
-    shutdown_lock = threading.Lock()
+
+def wait_for_visitor(turn_events):
+    while True:
+        try:
+            kind, value = turn_events.get(timeout=0.2)
+        except queue.Empty:
+            continue
+        if kind == "error":
+            raise ContinuousMicError(value)
+        return value
+
+
+def main(args):
+    if args.list_devices:
+        print_devices()
+        return
+
+    print(f"Connecting to ARI at {args.host}:{args.port}...")
+    robot = RemoteRobotInterface(
+        host=args.host,
+        port=args.port,
+        listener=TestListener(),
+    )
+    robot.set_language(args.language)
+    print("ARI connected.")
+
+    llm = LLM(
+        system_prompt=(
+            "Je bent ARI, een vriendelijke sociale robot. "
+            "Antwoord in het Nederlands met maximaal drie korte zinnen. "
+            "Gebruik geen emoji's of markdown."
+        )
+    )
 
     mic = ContinuousMic(
         device=args.device,
-        vad=args.vad,
-        model_size=args.model,
-        asr_device=args.asr_device,
-        compute_type=args.compute_type,
-        enable_partials=args.partials,
-        partial_interval_seconds=args.partial_interval,
+        vad="silero",
+        model_size="small",
+        language="nl",
+        enable_partials=False,
+        end_silence_ms=800,
     )
-    mic.set_robot_speaking(args.robot_speaking)
+    turn_events = queue.Queue()
 
-    def handle_event(event: MicEvent) -> None:
-        with shutdown_lock:
-            if shutdown_started.is_set():
-                return
-            if event.type == MicEventType.SPEECH_STARTED:
-                console.write("VAD", "Speech started", debug_only=True)
-                console.write(
-                    "METRIC",
-                    "speech start confirmed after "
-                    f"{event.data['onset_confirmation_ms']:.0f} ms",
-                    debug_only=True,
-                )
-            elif event.type == MicEventType.SPEECH_PAUSED:
-                console.write(
-                    "VAD",
-                    f"Temporary pause ({event.data['silence_ms']:.0f} ms)",
-                    debug_only=True,
-                )
-            elif event.type == MicEventType.SPEECH_RESUMED:
-                console.write("VAD", "Speech resumed", debug_only=True)
-            elif event.type == MicEventType.SPEECH_ENDED:
-                details = f" (silence: {event.data['silence_ms']:.0f} ms)"
-                console.write("VAD", f"Speech ended{details}", debug_only=True)
-                console.write(
-                    "METRIC",
-                    "end detection "
-                    f"{event.data['speech_end_detection_latency_ms']:.0f} ms; "
-                    f"reason={event.data['reason']}",
-                    debug_only=True,
-                )
-            elif event.type == MicEventType.PARTIAL_TRANSCRIPT:
-                console.write("ASR PARTIAL", event.text or "")
-                console.write(
-                    "METRIC",
-                    f"partial ASR {event.data['transcription_latency_ms']:.0f} ms; "
-                    f"queue {event.data['asr_queue_wait_ms']:.0f} ms "
-                    f"(revision {event.data['revision']})",
-                    debug_only=True,
-                )
-            elif event.type == MicEventType.FINAL_TRANSCRIPT:
-                if event.text:
-                    console.write("ASR FINAL", event.text)
-                    llm_worker.submit(event.text)
-                else:
-                    console.write("ASR FINAL", "No text recognized.")
-                console.write(
-                    "METRIC",
-                    f"final ASR {event.data['transcription_latency_ms']:.0f} ms; "
-                    f"queue {event.data['asr_queue_wait_ms']:.0f} ms; "
-                    "speech-end-to-text "
-                    f"{event.data['speech_end_to_transcript_ms']:.0f} ms; "
-                    f"dropped audio frames {event.data['dropped_audio_frames']}; "
-                    f"dropped ASR tasks {event.data['dropped_asr_tasks']}",
-                    debug_only=True,
-                )
-                console.write(
-                    "STATUS",
-                    format_status(mic.robot_speaking),
-                    debug_only=True,
-                )
-            elif event.type == MicEventType.INTERRUPTION_DETECTED:
-                console.write(
-                    "INTERRUPTION",
-                    "Speech detected while robot was speaking (simulation). "
-                    "This is unverified without acoustic echo cancellation.",
-                )
-            elif event.type == MicEventType.ERROR:
-                console.write(
-                    "MIC ERROR",
-                    f"{event.data['message']} [{event.data['stage']}]"
-                    + (f": {event.data['exception']}" if "exception" in event.data else ""),
-                )
+    def handle_event(event):
+        if event.type == MicEventType.FINAL_TRANSCRIPT:
+            text = (event.text or "").strip()
+            if text:
+                turn_events.put(("transcript", text))
+            else:
+                print("[LISTENING] No text recognized; still listening.")
+        elif event.type == MicEventType.ERROR:
+            message = event.data.get("message", "Microphone error")
+            print(f"[MIC ERROR] {message}")
+            if not event.data.get("recoverable", True):
+                turn_events.put(("error", message))
 
     mic.on("*", handle_event)
-    llm_worker.start()
-    exit_code = 0
+    microphone_announced = False
+
     try:
-        mic.start()
-        with shutdown_lock:
-            console.write("STATUS", format_status(mic.robot_speaking))
-        console.write(
-            "CONTROL",
-            "Press R to toggle simulated robot speech, Q to quit, or Ctrl+C to stop.",
-        )
-        while mic.is_running:
-            key = get_key()
-            if key == "r":
-                with shutdown_lock:
-                    mic.set_robot_speaking(not mic.robot_speaking)
-                    console.write("STATUS", format_status(mic.robot_speaking))
-            elif key == "q":
-                break
-            time.sleep(0.05)
-    except KeyboardInterrupt:
-        pass
-    except ContinuousMicError as error:
-        console.write("MIC ERROR", str(error))
-        exit_code = 1
-    finally:
-        with shutdown_lock:
-            shutdown_started.set()
-            llm_worker.begin_shutdown()
-            stopping_mic = mic.is_running
-            if stopping_mic:
-                console.write("MIC", "Stopping...")
-        try:
+        while True:
+            drain_events(turn_events)
+            mic.start()
+            if not microphone_announced:
+                print(f"Microphone: {microphone_description(args.device)}")
+                microphone_announced = True
+            print("[LISTENING] Waiting for the visitor...")
+
+            text = wait_for_visitor(turn_events)
+
+            # Stop from the main thread. ContinuousMic discards unfinished audio,
+            # ASR tasks, and events, while retaining its loaded models for restart.
             mic.stop()
-        except Exception as error:
-            exit_code = 1
-            console.write(
-                "MIC ERROR",
-                f"Shutdown failed ({type(error).__name__}): {error}",
-            )
-        else:
-            if stopping_mic:
-                console.write("MIC", "Stopped.")
-        try:
-            llm_worker.stop()
-        except Exception as error:
-            exit_code = 1
-            console.write(
-                "LLM ERROR",
-                f"Shutdown failed ({type(error).__name__}): {error}",
-            )
-    return exit_code
+            print(f"You: {text}")
+            print("[THINKING] Generating a response...")
+
+            try:
+                response = llm.prompt(text, max_tokens=80)
+                print(f"ARI: {response}")
+                print("[SPEAKING] ARI is speaking; microphone capture is stopped.")
+                robot.say(response)
+                print("[SPEAKING] Speech call finished.")
+            except Exception as error:
+                print(f"[ERROR] {error}")
+
+            time.sleep(COOLDOWN_SECONDS)
+
+    except KeyboardInterrupt:
+        print("\nStopping...")
+    finally:
+        if mic.is_running:
+            mic.stop()
+        print("Stopped.")
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    arguments = parse_args()
+    try:
+        main(arguments)
+    except ContinuousMicError as error:
+        raise SystemExit(f"[MIC ERROR] {error}")
