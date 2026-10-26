@@ -25,7 +25,7 @@ NEW_VISITOR_AFTER = 3
 GAZE_Y_OFFSET = -0.18
 
 GREETING = (
-    "[HAPPY] Hallo! Ik ben Furhat, de centrale informatie-robot van dit onderzoeksproject. "
+    "[HAPPY] Hallo! Ik ben Flynn, de centrale informatie-robot van dit onderzoeksproject. "
     "Ik vertel u graag over onze sociale robots Ari, Kjoetie en mijzelf, of over ons wetenschappelijk onderzoek. "
     "Waar wilt u meer over weten?"
 )
