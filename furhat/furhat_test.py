@@ -245,17 +245,17 @@ def detect_specific_robot_instruction(user_input):
     if asks_ari and not asks_qt:
         return (
             " (Instructie: De bezoeker vraagt specifiek naar Ari. Vertel ALLEEN over Ari in de derde persoon, "
-            "noem Q-T of jezelf NIET, spreek de robot Ari NIET direct aan, en vraag aan de bezoeker: 'Heeft u de demo bij Ari al geprobeerd?')"
+            "noem Kjoetie of jezelf NIET, spreek de robot Ari NIET direct aan, en vraag aan de bezoeker: 'Heeft u de demo bij Ari al geprobeerd?')"
         )
     if asks_qt and not asks_ari:
         return (
-            " (Instructie: De bezoeker vraagt specifiek naar Q-T. Vertel ALLEEN over Q-T voor studenten met leerstoornissen in de derde persoon, "
-            "noem Ari of jezelf NIET, spreek de robot Q-T NIET direct aan, en vraag aan de bezoeker: 'Heeft u de demo bij Q-T al geprobeerd?')"
+            " (Instructie: De bezoeker vraagt specifiek naar Kjoetie. Vertel ALLEEN over Kjoetie voor studenten met leerstoornissen in de derde persoon, "
+            "noem Ari of jezelf NIET, spreek de robot Q-T NIET direct aan, en vraag aan de bezoeker: 'Heeft u de demo bij Kjoetie al geprobeerd?')"
         )
     if asks_furhat and not asks_ari and not asks_qt:
         return (
-            " (Instructie: De bezoeker vraagt specifiek naar jou, Furhat. Vertel in de eerste persoon ALLEEN over jezelf, "
-            "noem Ari of Q-T NIET, en vraag NIET naar een demo.)"
+            " (Instructie: De bezoeker vraagt specifiek naar jou, Flynn. Vertel in de eerste persoon ALLEEN over jezelf, "
+            "noem Ari of Kjoetie NIET, en vraag NIET naar een demo.)"
         )
     if re.search(r"\b(nee|nog niet|niet gedaan|no)\b", lower):
         return (
