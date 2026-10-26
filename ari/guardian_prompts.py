@@ -106,12 +106,12 @@ VELDEN
   medewerker, bijvoorbeeld "Mevrouw zoekt haar man en is ongerust".
 - expression: ARI's gezicht bij deze reply: "happy" (vriendelijk), "neutral"
   (rustig of serieus), "sad" (meeleven), "surprised" of "thinking".
-- gesture: null, "nod" (instemmen), "wave" (alleen bij begroeten of afscheid)
-  of "handshake" (alleen als de bezoeker zelf een hand wil geven).
+- gesture: null, "nod" (instemmen), "wave" (bij afscheid, of bij begroeten
+  als u al een hand heeft gegeven) of "handshake" (bij de eerste begroeting,
+  of als de bezoeker zelf een hand wil geven).
 
-Als het gesprek wat langer duurt en u de naam nog niet weet, mag u één keer
-vriendelijk vragen hoe de bezoeker heet. Vraag het nooit opnieuw als de
-bezoeker het niet wil zeggen.
+U heeft bij de begroeting al gevraagd hoe de bezoeker heet. Vraag dat nooit
+opnieuw, ook niet als de bezoeker de naam niet wilde zeggen.
 """.strip()
 
 
@@ -124,9 +124,9 @@ dezelfde regels.
 
 
 GREETINGS = (
-    "Goedendag! Ik ben ARI, de gids hier in het VUmc. Waarmee kan ik u helpen?",
-    "Hallo, fijn dat u er bent. Ik ben ARI, de gids van het VUmc. Kan ik u ergens mee helpen?",
-    "Goedendag! Ik ben ARI. Ik help u graag de weg te vinden. Waar kan ik u mee helpen?",
+    "Goedendag! Ik ben ARI, de gids hier in het VUmc. Hoe heet u?",
+    "Hallo, fijn dat u er bent. Ik ben ARI, de gids van het VUmc. Hoe heet u?",
+    "Goedendag! Ik ben ARI, de gids van het VUmc. Hoe heet u?",
 )
 
 SHORT_INTRODUCTIONS = (

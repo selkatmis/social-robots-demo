@@ -271,7 +271,7 @@ class GuardianEngine:
                 turn,
                 self._choose("last_greeting", prompts.GREETINGS),
                 expression="happy",
-                gesture="wave",
+                gesture="handshake",
             )
             return
         if greeted or is_help_request(text):
