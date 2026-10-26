@@ -1,19 +1,100 @@
-Banks, Edwards, & Westerman (2021) - The Space Between: Nature and Machine Heuristics in Evaluations of Organisms, Cyborgs, and Robots: Deze studie onderzoekt hoe de categorie van een agent beïnvloedt hoe natuurlijk we gedrag waarnemen en hoe we oplossingen evalueren. Organismen worden vaker beoordeeld via een natuurheuristiek, terwijl cyborgs complexe grenzen oproepen.
+De onderzoekers die hier staan zijn van het onderzoeksproject ROBOT-BOND. In dit project wordt er bestudeerd hoe verschillende gebruikersgroepen een band kunnen opbouwen met robots in de zorg en het onderwijs. Dit project is mogelijk gemaakt door de Advanced Grant van de Europese Onderzoeksraad (ERC) toegekend aan Professor Elly Konijn, Vrije Universiteit Amsterdam.
+Wat is ROBOT-BOND?
+Robots vinden steeds meer hun weg in het dagelijks leven van mensen. Niet alleen robotstofzuigers en -grasmaaiers, maar ook robots waarmee je kunt communiceren door middel van verbaal en nonverbaal gedrag. Dit soort robots zijn sociale robots. Deze robots kunnen ondersteuning bieden in het uitvoeren van zorgtaken en hulp in de klas bijvoorbeeld daar waar professionals een tekort in personeel ervaren, echter staat dit nog wel in de kinderschoenen.
+Voordat deze robots in de zorg of in de klas worden ingezet, is het goed om te onderzoeken wat de impact van deze inzet kan zijn op de gebruikers. Daarom focust dit onderzoek op de fundamentele vragen: “Hoe vormen mensen een band met robots? Waarom doen zij dit en onder welke omstandigheden gebeurt dit? Wat zijn de consequenties daarvan?”
+Kennis over het vormen van zo’n band is erg belangrijk voor de inzet van robots bij kwetsbare groepen. Vergelijk het met les krijgen of in therapie zijn: je moet je op je gemak voelen bij de persoon die je ondersteunt.  
+Voor welke doelgroepen?
+Studenten
+In het verleden is er al veel robotonderzoek met studenten gedaan, omdat zij een makkelijk toegankelijke eerste testgroep vormen. Onderzoekers probeerden de robots dan eerst op studenten uit, om ze daarna in te zetten voor bijvoorbeeld kinderen of ouderen. Het ROBOT-BOND project kijkt ook naar studenten, maar dan niet als gelegenheidsgroep, maar echt om de studenten zelf. Robots kunnen voor hen ook mogelijke ondersteuning bieden bij het omgaan met de obstakels waar deze doelgroep mee te maken heeft. Denk bijvoorbeeld aan het helpen omgaan met prestatiedruk of tentamenstress. Ook kijkt het ROBOT-BOND project door studenten in het lab te bestuderen, naar wat er nu eigenlijk in ons brein gebeurt als we met een robot praten en welke aspecten nu eigenlijk essentieel zijn voor het vormen van een band met een robot door te kijken naar activiteit in het brein.
+Kinderen in het speciaal onderwijs
+Om kinderen in het speciaal onderwijs te ondersteunen op school kijkt het ROBOT-BOND project naar het gebruik van robots als tutor. Met name voor kinderen met autisme en kinderen met aandachtsproblemen kunnen robots effectieve maatjes zijn om de kinderen één-op-één te helpen op school. Samen met basisscholen onderzoeken we welke taak de robot kan vervullen, ontwikkelen we deze taak en onderzoeken we hoe de kinderen een band kunnen opbouwen tijdens een interactie met een robot.
+Jongeren (adolescenten) in de GGZ en jeugdzorg
+Er zijn veel jongeren die kampen met bijvoorbeeld autisme, milde angst of depressie. Deze jongeren staan vaak voor langere tijd op een wachtlijst bij bijvoorbeeld een GGZ- of jeugdzorginstelling voordat ze de hulp kunnen krijgen die ze nodig hebben. Ook is er al jaren een personeelsterkort voor deze zorg. Het ROBOT-BOND project kijkt hoe een robot deze jongeren kan helpen om symptomen te verlagen. Samen met zorgprofessionals en jongeren zoeken we naar een werkende en juiste toepassing. Zo kan een robot bijvoorbeeld helpen met structuur in de dag, gesprekken oefenen over moeilijke onderwerpen, emotieregulatie of bij het oefenen en uitvoeren van een signaleringsplan. Daarnaast gaan we ook hier kijken hoe deze jongeren een band opbouwen met een robot. 
+Jongvolwassenen met een beperking
+Jongvolwassenen met een beperking kunnen baat hebben bij interactie met een sociale robot, bijvoorbeeld om zo hun zelfstandigheid te vergroten. De ROBOT-BOND onderzoekers kijken samen met de jongvolwassenen en hun begeleiders naar wat robots kunnen doen om hun zelfstandigheid te vergroten of om te helpen bij sociale interacties. Daarnaast kijken we ook bij deze doelgroep hoe ze een band ontwikkelt met een robot.
+Theory of affective bonding - Wat maakt dat mensen een band opbouwen met een robot?
 
-Barry et al. (2026) - The Use of Social Robots in Primary School to Support Children's Academic and Social Emotional Learning: Een overzicht van dertig onderzoeken naar sociale robots op de basisschool. De focus ligt vooral op schoolse vakken zoals talen en wiskunde, terwijl sociaal-emotioneel leren nog nauwelijks direct gemeten wordt.
+Mensen kunnen een verrassend sterke band ontwikkelen met een sociale robot. Lange tijd werd gedacht dat robots hiervoor vooral zo menselijk mogelijk moesten lijken. Onderzoek laat echter zien dat een menselijk uiterlijk alleen niet voldoende is, en soms zelfs verwachtingen kan creëren die de robot niet kan waarmaken. Een robot hoeft dus niet per se steeds menselijker of realistischer te worden om een betekenisvolle relatie met gebruikers op te bouwen.
 
-Belpaeme et al. (2018) - Social robots for education: A review: Dit artikel toont aan dat fysieke sociale robotdocenten positieve leereffecten behalen die dicht in de buurt komen van menselijke bijles. Hun fysieke aanwezigheid zorgt voor meer betrokkenheid en motivatie dan schermen.
+Binnen het ROBOT-BOND project wordt gekeken naar de vraag waarom sommige interacties met robots als prettig, vertrouwd of persoonlijk worden ervaren. De Theory of Affective Bonding (TAB) stelt dat een band ontstaat door een samenspel van verschillende factoren. Ten eerste schrijven mensen gemakkelijk menselijke eigenschappen toe aan robots, vooral wanneer een robot communiceert, reageert en sociale signalen gebruikt. Dit betekent dat ook robots die niet sterk op mensen lijken toch als sociale partner kunnen worden gezien.
 
-Broadbent (2017) - Interactions With Robots: Deze overzichtsstudie laat zien dat mensen onbewust sociale regels en stereotypen toepassen op robots. Mensen schrijven robots mate van handelingsbekwaamheid toe en kunnen er empathie voor voelen, hoewel onnatuurlijke bewegingen het gevoel van de uncanny valley kunnen triggeren.
+Daarnaast is het belangrijk dat een robot aansluit bij een behoefte van de gebruiker. Een leerling die hulp nodig heeft bij rekenen, een jongere die ondersteuning zoekt bij emotieregulatie of een oudere die behoefte heeft aan gezelschap zal eerder een band ontwikkelen met een robot die hierin daadwerkelijk ondersteuning biedt. De relevantie van de robot voor de gebruiker speelt dus een belangrijke rol.
 
-Gasteiger, Hellou, & Ahn (2023) - Factors for Personalization and Localization to Optimize Human-Robot Interaction: Een overzicht van factoren om robots te personaliseren en te lokaliseren. Belangrijke aspecten zijn communicatiestijl en directheid, proxemics oftewel persoonlijke afstand, verwachtingen over gedrag, en het ontwerp van de interface per cultuur.
+Ook de kwaliteit van de communicatie is essentieel. Wanneer een robot aandacht toont, passende feedback geeft, gesprekken onthoudt of op een begrijpelijke manier reageert, kan de interactie betekenisvol aanvoelen. Hierdoor ontstaat het gevoel dat de robot echt betrokken is bij de interactie, ook al weet de gebruiker dat de robot geen mens is.
 
-Hellström, Kaiser, & Bensch (2024) - A Taxonomy of Embodiment in the AI Era: Dit artikel presenteert een taxonomie om embodiment te classificeren op basis van agent, mediator, omgeving, mate van lichaam en mate van verwevenheid. Ook worden offline embodiment bij taalmodellen en embodiment by proxy geïntroduceerd.
+Tot slot helpt het wanneer de mogelijkheden van de robot passen bij zijn rol. Een robot die duidelijk laat zien hoe hij kan helpen als tutor, coach of sociaal maatje maakt het voor gebruikers makkelijker om met hem samen te werken en vertrouwen op te bouwen.
 
-Konijn & Hoorn (2020) - Use of Communication Robots in Healthcare: Dit artikel bespreekt hoe communicatieve en sociale zorgrobots ouderen helpen bij eenzaamheid en dementie, en hoe robots kinderen met autisme of in het ziekenhuis ondersteunen. Patiënten blijken gemakkelijk een band op te bouwen met dergelijke machines.
+De belangrijkste les uit het ROBOT-BOND onderzoek en de Theory of Affective Bonding is daarom dat affectieve binding niet alleen ontstaat door hoe een robot eruitziet, maar vooral door hoe de robot communiceert, inspeelt op menselijke behoeften en betekenisvolle sociale interacties mogelijk maakt. Een goede band zit niet alleen in het ontwerp van de robot, maar vooral in de relatie die tijdens de interactie wordt opgebouwd.
 
-Konijn, Preciado Vanegas, & van Minkelen (2025) - Theory of Affective Bonding: Dit artikel introduceert een kader om te verklaren hoe en waarom mensen emotionele banden vormen met sociale robots. Dit is gebaseerd op vier mechanismen, waaronder het toekennen van menselijkheid, het vervullen van behoeften, emotiegedreven realisme en taakgerichte affordances.
+Waarom behandelen mensen robots soms als sociale wezens?
 
-Konijn, Smakman, & van den Berghe (2020) - Use of Robots in Education: Een bespreking van sociale robots in het onderwijs. Uit onderzoek blijkt dat leerlingen met leerproblemen of die snel afgeleid zijn, beter presteren met een neutrale robot dan met een sociaal expressieve robot die te veel kan afleiden.
+Mensen reageren vaak automatisch op sociale signalen. Wanneer een robot oogcontact maakt, iemand bij naam noemt, emoties herkent of een gesprek voert, gaan mensen deze robot deels behandelen als een sociale partner. Dit betekent niet dat mensen vergeten dat het een machine is, maar wel dat dezelfde sociale processen kunnen worden geactiveerd als in interacties met andere mensen.
 
-Laban et al. (2024) - Building Long-Term Human-Robot Relationships: Examining Disclosure, Perception and Well-Being Across Time: Een langdurig experiment waarbij deelnemers tien keer over vijf weken met robot Pepper praatten. Mensen bleken over tijd meer open te durven vertellen, vonden de robot socialer en bekwamer, en rapporteerden een verbeterde stemming en minder eenzaamheid.
+Dit verklaart waarom mensen empathie kunnen voelen voor een robot, een voorkeur kunnen ontwikkelen voor een specifieke robot of zelfs verdriet kunnen ervaren wanneer een vertrouwde robot verdwijnt.
+
+De rol van communicatie
+Een robot bouwt niet alleen een band op door aanwezig te zijn, maar vooral door interactie.
+Belangrijke elementen zijn:
+Luisteren en reageren
+Persoonlijke aandacht tonen
+Gesprekken onthouden
+Gebruikers herkennen
+Aanpassen aan individuele behoeften
+Passende verbale en non-verbale signalen
+De kwaliteit van deze interacties bepaalt vaak sterker hoe gebruikers de robot ervaren dan het fysieke ontwerp van de robot zelf.
+Wat is een goede mens-robotrelatie?
+
+Een sterk affectief bond betekent niet dat gebruikers een robot als mens moeten zien.
+
+In de context van zorg en onderwijs gaat het juist om een functionele en ondersteunende relatie waarin gebruikers:
+
+Zich op hun gemak voelen
+Gemotiveerd blijven
+De robot vertrouwen
+Baad hebben bij de ondersteuning
+
+Het doel is dus niet om menselijke relaties te vervangen, maar om technologie te ontwikkelen die op een veilige en betekenisvolle manier ondersteuning kan bieden.
+
+
+10 inzichten
+1. Mensen kunnen betekenisvolle banden opbouwen met robots 
+Onderzoek laat zien dat mensen zich verbonden kunnen voelen met een sociale robot. Hoewel deze relatie anders is dan een relatie tussen mensen, kan zij wel bijdragen aan motivatie, comfort, vertrouwen en betrokkenheid.
+
+2. Een goed ontwerp gaat verder dan alleen een heel menselijk uiterlijk 
+Het uiterlijk van een robot kan invloed hebben op hoe mensen reageren, maar het is niet de enige factor. De manier waarop een robot communiceert, luistert, reageert en ondersteuning biedt is vaak minstens zo belangrijk voor een positieve gebruikerservaring.
+
+3. Sociale robots zijn ontworpen om mensen te ondersteunen 
+Sociale robots kunnen worden ingezet als hulpmiddel in bijvoorbeeld zorg en onderwijs. Ze kunnen ondersteuning bieden bij specifieke taken of activiteiten en zo professionals aanvullen in hun werk.
+
+4. Sociale interactie staat centraal 
+Voor het opbouwen van een band hoeft een robot geen echte emoties te ervaren. Het vermogen om emoties te herkennen, passende reacties te geven en sociale signalen te gebruiken kan al bijdragen aan een prettige interactie.
+
+5. Iedere gebruiker is uniek 
+Mensen verschillen in hun ervaringen met robots. Factoren zoals leeftijd, persoonlijkheid, achtergrond en eerdere ervaring met technologie kunnen invloed hebben op hoe een robot wordt ervaren.
+
+6. Duidelijke rollen werken vaak het beste 
+Gebruikers waarderen robots die een duidelijke functie hebben, zoals tutor, coach of sociaal maatje. Een helder doel maakt het gemakkelijker om effectief samen te werken met een robot.
+
+7. Mensen weten dat een robot een machine is 
+Gebruikers zijn zich meestal bewust van het feit dat zij met een robot praten. Toch kunnen sociale interacties gevoelens van betrokkenheid en verbondenheid oproepen.
+
+8. Gebruikers hebben hun eigen voorkeuren en verwachtingen 
+Kinderen, jongeren, volwassenen en ouderen vormen allemaal hun eigen mening over robots. Zij denken kritisch na over de interactie en hebben vaak duidelijke voorkeuren voor hoe een robot zich gedraagt.
+
+9. Een positieve band kan voordelen bieden 
+Wanneer gebruikers zich op hun gemak voelen bij een robot, kan dit bijdragen aan motivatie, leerplezier, betrokkenheid en het volhouden van activiteiten of oefeningen.
+
+10. De kwaliteit van de interactie maakt het verschil 
+Uit onderzoek blijkt dat succesvolle mens-robotinteracties niet alleen afhangen van technologie. Ook de context, het doel van de interactie en de behoeften van de gebruiker spelen een belangrijke rol.
+
+Waarom investeren in onderzoek naar sociale robots?
+1. Ondersteuning bij personeelstekorten De vraag naar zorg en onderwijs groeit, terwijl er in veel sectoren sprake is van een aanhoudend tekort aan personeel. Onderzoek naar sociale robots helpt inzicht te krijgen in hoe technologie professionals kan ondersteunen, zodat zij meer tijd kunnen besteden aan menselijke taken die niet geautomatiseerd kunnen worden.
+2. Verbetering van kwaliteit van leven Voor mensen die te maken hebben met een beperking, psychische klachten, eenzaamheid of leeruitdagingen kunnen nieuwe technologische vormen van ondersteuning bijdragen aan meer zelfstandigheid, welzijn en participatie in de samenleving.
+3. Verantwoorde innovatie Technologie ontwikkelt zich snel. Door wetenschappelijk onderzoek kunnen we begrijpen welke toepassingen effectief, veilig en ethisch verantwoord zijn voordat zij op grote schaal worden ingezet. Dit voorkomt kostbare investeringen in oplossingen die niet werken of ongewenste effecten hebben.
+4. Sterkere Europese kennispositie Investeren in onderzoek draagt bij aan de positie van Nederland en Europa als koplopers in mensgerichte kunstmatige intelligentie en robotica. Hierdoor blijft kennis, innovatie en economische waarde binnen Europa.
+5. Technologie die aansluit bij de behoeften van mensen Technische innovatie alleen is niet voldoende. Onderzoek naar mens-technologie-interactie helpt ervoor te zorgen dat nieuwe technologieën daadwerkelijk aansluiten bij de wensen, verwachtingen en waarden van gebruikers.
+6. Ondersteuning voor kwetsbare groepen Mensen met psychische klachten, ontwikkelingsstoornissen, licht verstandelijke beperkingen of een andere ondersteuningsbehoefte kunnen baat hebben bij nieuwe vormen van begeleiding. Onderzoek helpt vaststellen voor wie technologie werkt, wanneer zij werkt en onder welke voorwaarden.
+7. Evidence-based beleid Onderzoek levert wetenschappelijke kennis op waarmee beleidsmakers beter kunnen bepalen waar publieke middelen effectief kunnen worden ingezet. Dit helpt bij het maken van onderbouwde keuzes in plaats van beslissingen op basis van verwachtingen of hype.
+8. Voorbereiden op een digitale samenleving Net zoals computers en smartphones onderdeel zijn geworden van het dagelijks leven, zullen intelligente systemen een steeds grotere rol spelen. Onderzoek zorgt ervoor dat de samenleving voorbereid is op deze ontwikkelingen en actief kan sturen op de gewenste richting.
+Samenvattend: 
+Investeren in onderzoek naar sociale robots is niet investeren in robots, maar investeren in kennis over hoe technologie mensen op een veilige, effectieve en mensgerichte manier kan ondersteunen in een samenleving die voor grote uitdagingen staat.
