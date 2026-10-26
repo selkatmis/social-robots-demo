@@ -172,12 +172,14 @@ class FasterWhisperTranscriber:
         compute_type: str = "int8",
         beam_size: int = 5,
         partial_beam_size: int = 1,
+        hotwords: Optional[str] = None,
     ) -> None:
         self.model_size = model_size
         self.device = device
         self.compute_type = compute_type
         self.beam_size = beam_size
         self.partial_beam_size = partial_beam_size
+        self.hotwords = hotwords
         self._model: Any = None
         self._load_lock = threading.Lock()
 
@@ -219,6 +221,7 @@ class FasterWhisperTranscriber:
             temperature=0.0,
             vad_filter=False,
             without_timestamps=True,
+            hotwords=self.hotwords,
         )
         return " ".join(
             segment.text.strip() for segment in segments if segment.text.strip()
@@ -400,6 +403,7 @@ class ContinuousMic:
         model_size: str = "small",
         asr_device: str = "cpu",
         compute_type: str = "int8",
+        hotwords: Optional[str] = None,
         speech_onset_ms: int = 200,
         pause_ms: int = 250,
         end_silence_ms: int = 800,
@@ -449,6 +453,7 @@ class ContinuousMic:
                 model_size=model_size,
                 device=asr_device,
                 compute_type=compute_type,
+                hotwords=hotwords,
             )
         elif isinstance(transcriber, str):
             raise ValueError("transcriber must be 'faster-whisper', None, or a backend object")
