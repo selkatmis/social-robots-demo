@@ -229,9 +229,9 @@ def build_system_prompt():
 def normalize_speech(text):
     """Normalizes common speech-to-text misrecognitions for the robot names."""
     cleaned = text.strip()
-    cleaned = re.sub(r"\b(cutie\s*robot|cutie|q\s*t\s*robot|qtrobot|qt)\b", "Q-T", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(cutie\s*robot|cutie|q\s*t\s*robot|qtrobot|qt)\b", "Kjoetie", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\b(arie|ari\s*robot|ali)\b", "Ari", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\b(voorhout|farhad|ferhat|fur\s*hat)\b", "Furhat", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(voorhout|farhad|ferhat|fur\s*hat)\b", "Flynn", cleaned, flags=re.IGNORECASE)
     return cleaned
 
 
