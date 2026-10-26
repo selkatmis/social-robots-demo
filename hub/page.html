@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Robots">
+<meta name="theme-color" content="#000000">
+<link rel="apple-touch-icon" href="/static/icon.png">
+<link rel="icon" href="/static/icon.png">
+<title>Robots</title>
+<style>
+@font-face { font-family: 'Ubuntu'; font-weight: 400; font-display: swap; src: url(/static/fonts/ubuntu-400.woff2) format('woff2'); }
+@font-face { font-family: 'Ubuntu'; font-weight: 500; font-display: swap; src: url(/static/fonts/ubuntu-500.woff2) format('woff2'); }
+@font-face { font-family: 'Ubuntu'; font-weight: 700; font-display: swap; src: url(/static/fonts/ubuntu-700.woff2) format('woff2'); }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; background: #fff; color: #000; font-family: 'Ubuntu', 'DejaVu Sans', sans-serif; font-size: 17px; }
+body { padding-bottom: env(safe-area-inset-bottom); }
+button { font: inherit; font-weight: 500; border: 3px solid #000; border-radius: 14px; background: #fff; color: #000;
+  padding: 12px 14px; cursor: pointer; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+button.solid, button.on { background: #000; color: #fff; }
+button:disabled { opacity: .28; cursor: default; }
+button:active:not(:disabled) { transform: scale(.97); }
+input, textarea { font: inherit; border: 3px solid #000; border-radius: 14px; padding: 11px 13px; background: #fff; color: #000; width: 100%; min-width: 0; }
+input:focus, textarea:focus { outline: none; box-shadow: inset 0 0 0 2px #000; }
+h2 { margin: 0 0 10px; font-size: 14px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
+
+header { position: sticky; top: 0; z-index: 5; background: #000; color: #fff; display: flex; align-items: center;
+  justify-content: space-between; padding: 12px 22px; padding-top: max(12px, env(safe-area-inset-top)); }
+header h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: 3px; }
+header .sub { font-size: 14px; opacity: .7; margin-left: 14px; letter-spacing: 1px; }
+header .right { display: flex; align-items: center; gap: 14px; font-size: 15px; }
+#link { width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff; }
+#link.ok { background: #fff; }
+#clock { font-weight: 700; font-size: 18px; min-width: 50px; text-align: right; }
+
+main { padding: 14px 18px 24px; display: flex; flex-direction: column; gap: 14px; }
+.robots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.card { border: 3px solid #000; border-radius: 16px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.card .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.card .name { font-size: 26px; font-weight: 700; letter-spacing: 1px; }
+.card .role { font-size: 14px; opacity: .65; }
+.card .state { display: flex; align-items: center; gap: 8px; font-weight: 500; }
+.dot { width: 13px; height: 13px; border-radius: 50%; border: 2.5px solid #000; flex: none; }
+.dot.on { background: #000; }
+.dot.busy { animation: blink .8s infinite alternate; background: #000; }
+.dot.bad { background: repeating-linear-gradient(45deg, #000 0 3px, #fff 3px 6px); }
+@keyframes blink { from { opacity: .15; } to { opacity: 1; } }
+.card .detail { font-size: 13px; opacity: .6; height: 17px; overflow: hidden; line-height: 17px; white-space: nowrap; text-overflow: ellipsis; }
+.card .actions { display: flex; gap: 8px; align-items: stretch; margin-top: auto; }
+.card .actions .go { flex: 1; font-size: 18px; font-weight: 700; padding: 11px 8px; }
+.card .actions .small { font-size: 14px; padding: 8px 12px; }
+.seg { display: flex; flex-direction: column; border: 3px solid #000; border-radius: 12px; overflow: hidden; flex: none; }
+.seg button { border: 0; border-radius: 0; flex: 1; padding: 3px 10px; font-size: 13px; }
+.seg button + button { border-top: 3px solid #000; }
+
+.ari { border: 3px solid #000; border-radius: 16px; padding: 14px 16px; display: grid; grid-template-columns: 1.1fr 1.05fr .85fr; gap: 18px; }
+.ari.off .needs-ari { opacity: .28; pointer-events: none; }
+.col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.head-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 2px solid #000; border-radius: 999px; padding: 3px 10px; font-size: 13px; font-weight: 500; white-space: nowrap; }
+.chip.on { background: #000; color: #fff; }
+
+.logwrap { position: relative; }
+#alert { display: none; position: absolute; left: 8px; right: 8px; top: 8px; z-index: 2; background: #000; color: #fff;
+  border-radius: 12px; padding: 12px 14px; gap: 8px 10px; align-items: center; flex-wrap: wrap; box-shadow: 0 0 0 3px #fff; }
+#alert.show { display: flex; }
+#alert.urgent { animation: pulse 0.9s infinite alternate; }
+@keyframes pulse { from { box-shadow: 0 0 0 0 #000; } to { box-shadow: 0 0 0 6px #fff, 0 0 0 9px #000; } }
+#alert .what { flex: 1 1 100%; min-width: 0; }
+#alert .kind { font-weight: 700; letter-spacing: 1.5px; font-size: 15px; }
+#alert .note { font-size: 15px; opacity: .9; margin-top: 2px; }
+#alert button { flex: 1; border-color: #fff; background: #fff; color: #000; padding: 9px 12px; font-size: 15px; }
+#alert button.ghost { background: #000; color: #fff; }
+
+#log { border: 3px solid #000; border-radius: 14px; padding: 10px 12px; height: 340px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.line { margin: 0 0 9px; line-height: 1.35; font-size: 16px; }
+.line .who { display: block; font-size: 12px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; opacity: .55; }
+.line.ari-line { font-weight: 500; }
+.line.ari-line .who { opacity: 1; }
+.line.note { font-size: 13px; opacity: .55; font-style: italic; }
+#empty { opacity: .5; font-size: 15px; }
+.row { display: flex; gap: 8px; }
+.row > * { min-width: 0; }
+.row .grow { flex: 1; }
+.phrases { display: flex; flex-wrap: wrap; gap: 6px; }
+.phrases button { font-size: 14px; padding: 7px 11px; border-width: 2px; border-radius: 999px; }
+.grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+.grid4 button, .grid3 button { padding: 10px 2px; font-size: 15px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+.face.on { background: #000; color: #fff; }
+#dance { font-size: 24px; font-weight: 700; letter-spacing: 4px; padding: 12px; }
+#dance.on { animation: blink .5s infinite alternate; }
+details summary { cursor: pointer; font-size: 14px; font-weight: 500; opacity: .7; padding: 4px 0; }
+details textarea { margin-top: 6px; font-size: 14px; resize: vertical; }
+
+.pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; touch-action: none; }
+.pad button { touch-action: none; font-size: 28px; padding: 0; height: 66px; border-radius: 16px; }
+.pad button.held { background: #000; color: #fff; }
+#stopAll { background: #000; color: #fff; font-size: 28px; font-weight: 700; letter-spacing: 5px; padding: 18px; border-radius: 18px; }
+.hint { font-size: 13px; opacity: .6; line-height: 1.35; }
+.volume { display: flex; align-items: center; gap: 10px; }
+.volume input { border: 0; padding: 0; accent-color: #000; height: 36px; }
+.volume span { min-width: 42px; text-align: right; font-weight: 700; }
+
+#toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(20px);
+  background: #000; color: #fff; padding: 12px 18px; border-radius: 14px; font-weight: 500; opacity: 0; pointer-events: none;
+  transition: transform .2s, opacity .2s; max-width: 90vw; z-index: 20; }
+#toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+#modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 30; padding: 30px; }
+#modal.show { display: flex; align-items: center; justify-content: center; }
+#modal .box { background: #fff; border: 3px solid #000; border-radius: 18px; width: min(900px, 100%); max-height: 100%; display: flex; flex-direction: column; }
+#modal .bar { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 3px solid #000; }
+#modal pre { margin: 0; padding: 14px 16px; overflow: auto; font-family: 'Ubuntu Mono', ui-monospace, Menlo, monospace; font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+.address { font-size: 13px; opacity: .6; text-align: center; }
+
+@media (max-width: 900px) {
+  .card .actions { flex-wrap: wrap; }
+  .seg { flex-direction: row; flex: 1 1 100%; }
+  .seg button + button { border-top: 0; border-left: 3px solid #000; }
+  .seg button { padding: 6px 8px; }
+}
+@media (max-width: 1050px) {
+  .ari { grid-template-columns: 1fr 1fr; }
+  .ari .col.drive { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; align-items: start; }
+}
+@media (max-width: 720px) {
+  .robots, .ari { grid-template-columns: 1fr; }
+  .ari .col.drive { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div><h1 style="display:inline">ROBOTS</h1><span class="sub">VU · Sociale robots</span></div>
+  <div class="right"><span id="linkText">verbinden...</span><span id="link"></span><span id="clock">--:--</span></div>
+</header>
+
+<main>
+  <section class="robots" id="robots"></section>
+
+  <section class="ari off" id="ari">
+    <div class="col">
+      <div class="head-row">
+        <h2 style="margin:0">ARI · Gesprek</h2>
+        <div class="chips" id="ariChips"></div>
+      </div>
+      <div class="logwrap">
+        <div id="alert">
+          <div class="what"><div class="kind" id="alertKind"></div><div class="note" id="alertNote"></div></div>
+          <button id="alertCome">Ik kom eraan</button>
+          <button class="ghost" id="alertClear">Wissen</button>
+        </div>
+        <div id="log" aria-live="polite"><div id="empty">Start ARI om het gesprek hier te volgen.</div></div>
+      </div>
+      <div class="row needs-ari">
+        <button class="solid grow" id="greet">Begroet bezoeker</button>
+        <button class="grow" id="standby">Terug naar standby</button>
+      </div>
+    </div>
+
+    <div class="col needs-ari">
+      <h2>Gezicht</h2>
+      <div class="grid4" id="faces"></div>
+      <h2 style="margin-top:2px">Gebaren</h2>
+      <div class="grid4">
+        <button data-gesture="wave">Zwaaien</button>
+        <button data-gesture="nod">Knikken</button>
+        <button data-gesture="cheer">Juichen</button>
+        <button class="solid" id="handshake">Hand geven</button>
+      </div>
+      <button class="solid" id="dance">DANS</button>
+      <div class="grid4" id="emotes"></div>
+      <h2 style="margin-top:2px">Laat ARI iets zeggen</h2>
+      <form class="row" id="sayForm">
+        <input id="sayText" class="grow" maxlength="400" placeholder="Typ een zin in het Nederlands" autocomplete="off" enterkeyhint="send">
+        <button class="solid" type="submit">Zeg</button>
+      </form>
+      <div class="phrases" id="phrases"></div>
+      <details>
+        <summary>Eigen emote</summary>
+        <textarea id="emoteScript" rows="4" placeholder="Eén stap per regel, bijvoorbeeld:&#10;expression happy&#10;turn 30&#10;gesture wave&#10;say Hallo allemaal!"></textarea>
+        <button style="margin-top:6px;width:100%" id="runScript">Speel af</button>
+      </details>
+    </div>
+
+    <div class="col drive needs-ari">
+      <div class="col">
+        <h2>Rijden</h2>
+        <div class="pad">
+          <span></span><button data-move="forward" aria-label="Vooruit">&#9650;</button><span></span>
+          <button data-move="left" aria-label="Links draaien">&#9664;</button>
+          <button data-move="stop" aria-label="Stil staan">&#9632;</button>
+          <button data-move="right" aria-label="Rechts draaien">&#9654;</button>
+          <span></span><button data-move="back" aria-label="Achteruit">&#9660;</button><span></span>
+        </div>
+        <div class="hint" id="moveHint">Houd een pijl ingedrukt om te rijden. Loslaten stopt.</div>
+      </div>
+      <div class="col">
+        <button id="stopAll">STOP</button>
+        <div class="hint">Stopt rijden, dansen, muziek en praten.</div>
+        <h2 style="margin-top:6px">Volume</h2>
+        <div class="volume"><input type="range" id="volume" min="30" max="100" step="5" value="80"><span id="volumeText">--</span></div>
+      </div>
+    </div>
+  </section>
+  <div class="address" id="address"></div>
+</main>
+
+<div id="toast"></div>
+<div id="modal"><div class="box"><div class="bar"><h2 style="margin:0" id="modalTitle">Log</h2><button id="modalClose">Sluiten</button></div><pre id="modalText"></pre></div></div>
+
+<script>
+const FACES = [['happy','Blij'],['neutral','Neutraal'],['surprised','Verrast'],['sad','Verdrietig'],
+  ['thinking','Denkend'],['confused','Verward'],['shy','Verlegen'],['excited','Enthousiast']];
+const FACE_ALIASES = {embarrassed:'shy', skeptical:'thinking'};
+const PHRASES = [['Welkom', 'Goedendag, welkom bij onze stand!'], ['Momentje', 'Een momentje alstublieft.'],
+  ['Wie ben ik', 'Ik ben ARI, een sociale robot. Ik ben de gids van het VUmc.'],
+  ['Collega QT', 'Kijk, daar staat mijn collega QT. Die geeft bijles.'], ['Tot ziens', 'Dank u wel en tot ziens!']];
+const PHASES = {STANDBY:'Standby', HELP:'Helpt', ANYTHING_ELSE:'Nog iets?', GOODBYE:'Afscheid',
+  INVITATION:'Uitnodiging', ASK_NAME:'Naam', CONVERSATION:'Gesprek', CONTINUE_CHECK:'Verder?'};
+const ACTIVITY = {LISTENING:'Luistert', SPEAKING:'Praat', THINKING:'Denkt na'};
+const STATUS = {off:'Uit', starting:'Starten...', running:'Draait', stopping:'Stoppen...', error:'Fout', external:'Draait (buiten de hub)'};
+const ALERTS = {help:'HULP GEVRAAGD', escort:'BEGELEIDING GEVRAAGD', urgent:'SPOED'};
+
+let state = null;
+let ari = null;
+let lastTranscript = '';
+let volumeTouched = 0;
+let modeChoice = localStorage.getItem('ariMode') || 'guardian';
+const $ = id => document.getElementById(id);
+
+function toast(text) {
+  const element = $('toast'); element.textContent = text; element.classList.add('show');
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => element.classList.remove('show'), 2600);
+}
+
+async function api(path, body, method) {
+  try {
+    const response = await fetch(path, {method: method || 'POST', headers: {'Content-Type': 'application/json'},
+      body: method === 'GET' ? undefined : JSON.stringify(body || {})});
+    const data = await response.json();
+    if (data && data.ok === false && data.error) toast(data.error);
+    return data;
+  } catch (error) {
+    toast('Geen verbinding met de laptop.');
+    return {ok: false};
+  }
+}
+const ariApi = (action, body) => api('/api/ari/' + action, body);
+
+function buildRobots() {
+  const holder = $('robots');
+  for (const key of ['ari', 'qt', 'furhat']) {
+    const card = document.createElement('div');
+    card.className = 'card'; card.id = 'card-' + key;
+    card.innerHTML = `
+      <div class="top"><span class="name"></span><span class="role"></span></div>
+      <div class="state"><span class="dot"></span><span class="status"></span><span class="uptime" style="opacity:.6;font-size:14px"></span></div>
+      <div class="detail"></div>
+      <div class="actions">${key === 'ari' ? `<div class="seg"><button data-mode="guardian">Gids VUmc</button><button data-mode="companion">Gesprek</button></div>` : ''}<button class="go solid"></button><button class="small" data-log>Log</button></div>`;
+    card.querySelector('.go').addEventListener('click', () => toggleRobot(key));
+    card.querySelector('[data-log]').addEventListener('click', () => showLog(key));
+    for (const button of card.querySelectorAll('[data-mode]'))
+      button.addEventListener('click', () => { modeChoice = button.dataset.mode; localStorage.setItem('ariMode', modeChoice); render(); });
+    holder.append(card);
+  }
+}
+
+async function toggleRobot(key) {
+  const robot = state && state.robots.find(item => item.key === key);
+  if (!robot) return;
+  const button = $('card-' + key).querySelector('.go');
+  button.disabled = true;
+  if (key === 'ari' && robot.hint === 'update' && !robot.running) {
+    const result = await api('/api/robots/ari_update/start');
+    if (result.ok) toast('De nieuwe sidecar gaat naar ARI...');
+  } else if (robot.running) {
+    await api(`/api/robots/${key}/stop`);
+  } else {
+    const result = await api(`/api/robots/${key}/start`, key === 'ari' ? {mode: modeChoice} : {});
+    if (result.ok) toast(`${robot.name} wordt gestart...`);
+  }
+  setTimeout(refresh, 300);
+}
+
+async function showLog(key) {
+  const update = state && state.robots.find(item => item.key === 'ari_update');
+  if (key === 'ari' && update && (update.running || update.status === 'error')) key = 'ari_update';
+  const data = await api(`/api/robots/${key}/log`, null, 'GET');
+  const robot = state && state.robots.find(item => item.key === key);
+  $('modalTitle').textContent = 'Log · ' + (robot ? robot.name : key);
+  $('modalText').textContent = (data.lines || []).join('\n') || 'Nog geen uitvoer.';
+  $('modal').classList.add('show');
+  const pre = $('modalText'); pre.scrollTop = pre.scrollHeight;
+}
+$('modalClose').addEventListener('click', () => $('modal').classList.remove('show'));
+$('modal').addEventListener('click', event => { if (event.target === $('modal')) $('modal').classList.remove('show'); });
+
+function renderRobots() {
+  const update = state.robots.find(item => item.key === 'ari_update');
+  for (const robot of state.robots) {
+    const card = $('card-' + robot.key);
+    if (!card) continue;
+    card.querySelector('.name').textContent = robot.name;
+    card.querySelector('.role').textContent = robot.role;
+    card.querySelector('.status').textContent = STATUS[robot.status] || robot.status;
+    const dot = card.querySelector('.dot');
+    dot.className = 'dot' + ({running:' on', external:' on', starting:' busy', stopping:' busy', error:' bad'}[robot.status] || '');
+    const minutes = robot.uptime ? Math.floor(robot.uptime / 60) : null;
+    card.querySelector('.uptime').textContent = robot.running && minutes !== null ? `· ${minutes} min` : '';
+    card.querySelector('.detail').textContent = robot.status === 'external'
+      ? 'Met de hand gestart op deze laptop; stoppen kan daar met Ctrl+C.' : (robot.detail || '');
+    const go = card.querySelector('.go');
+    go.disabled = robot.status === 'external';
+    go.textContent = robot.running ? (robot.status === 'stopping' ? 'Toch stoppen' : 'Stop ' + robot.name) : 'Start ' + robot.name;
+    go.classList.toggle('solid', !robot.running);
+    if (robot.key === 'ari' && !robot.running && update && (update.running || update.status === 'error')) {
+      card.querySelector('.status').textContent = update.running ? 'Sidecar bijwerken...' : 'Bijwerken mislukt';
+      dot.className = 'dot' + (update.running ? ' busy' : ' bad');
+      card.querySelector('.detail').textContent = update.detail || '';
+      go.textContent = update.running ? 'Even geduld...' : 'Probeer opnieuw';
+      go.disabled = update.running;
+      if (!update.running) robot.hint = 'update';
+    } else if (robot.key === 'ari' && !robot.running && robot.hint === 'update') {
+      card.querySelector('.detail').textContent = 'ARI heeft eerst de nieuwe sidecar nodig.';
+      go.textContent = 'Sidecar bijwerken';
+    }
+    for (const button of card.querySelectorAll('[data-mode]')) {
+      const active = ari && robot.key === 'ari' ? ari.mode === button.dataset.mode : modeChoice === button.dataset.mode;
+      button.classList.toggle('on', active);
+      button.disabled = robot.running || robot.status === 'external';
+    }
+  }
+}
+
+function renderTranscript(items) {
+  const key = items.length + '|' + (items.length ? items[items.length - 1].text : '');
+  if (key === lastTranscript) return;
+  lastTranscript = key;
+  const log = $('log');
+  const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+  log.replaceChildren();
+  if (!items.length) {
+    const empty = document.createElement('div'); empty.id = 'empty';
+    empty.textContent = ari ? 'ARI wacht op een bezoeker. Zeg "Hallo" of tik op Begroet bezoeker.' : 'Start ARI om het gesprek hier te volgen.';
+    log.append(empty); return;
+  }
+  for (const item of items) {
+    const line = document.createElement('div');
+    if (!item.speaker) { line.className = 'line note'; line.textContent = item.text; log.append(line); continue; }
+    line.className = 'line' + (item.speaker === 'ARI' ? ' ari-line' : '');
+    const who = document.createElement('span'); who.className = 'who';
+    who.textContent = item.speaker === 'ARI' ? 'ARI' : 'Bezoeker';
+    line.append(who, document.createTextNode(item.text));
+    log.append(line);
+  }
+  if (nearBottom) log.scrollTop = log.scrollHeight;
+}
+
+function chip(text, on) {
+  const element = document.createElement('span');
+  element.className = 'chip' + (on ? ' on' : ''); element.textContent = text; return element;
+}
+
+function renderAri() {
+  const panel = $('ari');
+  panel.classList.toggle('off', !ari);
+  const chips = $('ariChips'); chips.replaceChildren();
+  if (!ari) {
+    chips.append(chip('Niet actief'));
+    renderTranscript([]);
+    $('alert').className = '';
+    return;
+  }
+  chips.append(chip(ari.mode === 'guardian' ? 'Gids VUmc' : 'Gesprek', true));
+  chips.append(chip(PHASES[ari.phase] || ari.phase));
+  chips.append(chip(ACTIVITY[ari.activity] || ari.activity, ari.activity === 'SPEAKING'));
+  if (ari.face_count) chips.append(chip(ari.face_count === 1 ? '1 gezicht' : ari.face_count + ' gezichten'));
+  if (!ari.connected) chips.append(chip('Robot niet verbonden', true));
+  else if (!ari.control_connected) chips.append(chip('Sidecar niet verbonden', true));
+  if (ari.action) chips.append(chip('Bezig: ' + ari.action, true));
+  renderTranscript(ari.transcript || []);
+
+  const alert = ari.alert;
+  if (alert) {
+    $('alert').className = 'show' + (alert.kind === 'urgent' ? ' urgent' : '');
+    $('alertKind').textContent = (ALERTS[alert.kind] || 'HULP') + ' · ' + alert.time;
+    $('alertNote').textContent = alert.note + (alert.place ? ' · Naar: ' + alert.place : '');
+  } else {
+    $('alert').className = '';
+  }
+
+  const face = FACE_ALIASES[ari.expression] || ari.expression;
+  for (const button of document.querySelectorAll('.face')) button.classList.toggle('on', button.dataset.face === face);
+
+  const emotes = (ari.emotes || []).filter(name => name !== 'Dans');
+  const holder = $('emotes');
+  if (holder.dataset.names !== emotes.join('|')) {
+    holder.dataset.names = emotes.join('|');
+    holder.replaceChildren();
+    for (const name of emotes) {
+      const button = document.createElement('button'); button.textContent = name;
+      button.addEventListener('click', () => playEmote(name));
+      holder.append(button);
+    }
+  }
+  $('dance').classList.toggle('on', ari.action === 'Dans');
+  $('dance').disabled = !(ari.emotes || []).includes('Dans');
+
+  const canMove = ari.movement_available;
+  for (const button of document.querySelectorAll('[data-move]')) button.disabled = !canMove && button.dataset.move !== 'stop';
+  $('moveHint').textContent = !canMove
+    ? 'Rijden kan nu niet: de sidecar of de basis van ARI is niet beschikbaar.'
+    : (ari.obstacle_sensor === 'none'
+      ? 'Houd een pijl ingedrukt om te rijden. Geen obstakelsensor actief: rijd voorzichtig.'
+      : 'Houd een pijl ingedrukt om te rijden. Loslaten stopt. ARI stopt zelf voor obstakels.');
+  if (ari.volume && Date.now() - volumeTouched > 4000) { $('volume').value = ari.volume; $('volumeText').textContent = ari.volume + '%'; }
+}
+
+function render() {
+  if (!state) return;
+  renderRobots();
+  renderAri();
+}
+
+async function refresh() {
+  if (refresh.busy) return;
+  refresh.busy = true;
+  try {
+    const response = await fetch('/api/state', {cache: 'no-store'});
+    state = await response.json();
+    const hadAri = !!ari;
+    ari = state.ari;
+    $('link').className = 'ok'; $('linkText').textContent = 'verbonden';
+    $('clock').textContent = state.time;
+    if (state.urls && state.urls.length) $('address').textContent = 'Open op de iPad: ' + state.urls.join('  ·  ');
+    if (ari && !hadAri) loadVolume();
+    render();
+  } catch (error) {
+    $('link').className = ''; $('linkText').textContent = 'geen verbinding';
+    stopMove();
+  } finally {
+    refresh.busy = false;
+  }
+}
+
+async function loadVolume() {
+  const data = await api('/api/ari/volume', null, 'GET');
+  if (data && data.percent) { $('volume').value = data.percent; $('volumeText').textContent = data.percent + '%'; }
+}
+
+async function playEmote(name) {
+  const result = await ariApi('emote', {name});
+  if (result.ok) toast(name);
+}
+
+function buildControls() {
+  for (const [label, phrase] of PHRASES) {
+    const button = document.createElement('button'); button.textContent = label; button.title = phrase;
+    button.addEventListener('click', () => ariApi('say', {text: phrase}));
+    $('phrases').append(button);
+  }
+  for (const [name, label] of FACES) {
+    const button = document.createElement('button'); button.className = 'face'; button.dataset.face = name; button.textContent = label;
+    button.addEventListener('click', () => ariApi('expression', {name}));
+    $('faces').append(button);
+  }
+  for (const button of document.querySelectorAll('[data-gesture]'))
+    button.addEventListener('click', () => ariApi('gesture', {name: button.dataset.gesture}));
+  $('handshake').addEventListener('click', () => ariApi('handshake'));
+  $('dance').addEventListener('click', () => playEmote('Dans'));
+  $('runScript').addEventListener('click', async () => {
+    const script = $('emoteScript').value.trim();
+    if (!script) { toast('Typ eerst een paar stappen.'); return; }
+    const result = await ariApi('emote', {script});
+    if (result.ok) toast('Eigen emote speelt af');
+  });
+  $('sayForm').addEventListener('submit', async event => {
+    event.preventDefault();
+    const text = $('sayText').value.trim();
+    if (!text) return;
+    const result = await ariApi('say', {text});
+    if (result.ok) $('sayText').value = '';
+  });
+  $('greet').addEventListener('click', () => ariApi('greet'));
+  $('standby').addEventListener('click', async () => { stopMove(); await ariApi('standby'); lastTranscript = ''; refresh(); });
+  $('alertCome').addEventListener('click', () => ariApi('alert/ack', {speak: true}));
+  $('alertClear').addEventListener('click', () => ariApi('alert/ack', {speak: false}));
+  $('stopAll').addEventListener('click', () => { stopMove(); ariApi('stop'); toast('Alles gestopt'); });
+  $('volume').addEventListener('input', () => { volumeTouched = Date.now(); $('volumeText').textContent = $('volume').value + '%'; });
+  $('volume').addEventListener('change', () => { volumeTouched = Date.now(); ariApi('volume', {percent: Number($('volume').value)}); });
+}
+
+let moveTimer = null;
+let heldAction = null;
+let heldButton = null;
+function sendMove(action) { return fetch('/api/ari/move', {method: 'POST', headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({action})}).catch(() => {}); }
+function startMove(action, button) {
+  if (action === 'stop') { stopMove(); return; }
+  if (heldAction === action) return;
+  stopMove();
+  heldAction = action; heldButton = button || null;
+  if (heldButton) heldButton.classList.add('held');
+  sendMove(action);
+  moveTimer = setInterval(() => sendMove(action), 250);
+}
+function stopMove() {
+  const wasMoving = heldAction !== null;
+  if (moveTimer) clearInterval(moveTimer);
+  moveTimer = null; heldAction = null;
+  if (heldButton) heldButton.classList.remove('held');
+  heldButton = null;
+  if (wasMoving) sendMove('stop');
+}
+function buildPad() {
+  for (const button of document.querySelectorAll('[data-move]')) {
+    const action = button.dataset.move;
+    button.addEventListener('pointerdown', event => {
+      event.preventDefault();
+      if (button.setPointerCapture) { try { button.setPointerCapture(event.pointerId); } catch (_) {} }
+      if (action === 'stop') { stopMove(); sendMove('stop'); return; }
+      startMove(action, button);
+    });
+    for (const name of ['pointerup', 'pointercancel', 'lostpointercapture'])
+      button.addEventListener(name, () => { if (heldButton === button) stopMove(); });
+    button.addEventListener('contextmenu', event => event.preventDefault());
+  }
+  const keys = {ArrowUp: 'forward', ArrowDown: 'back', ArrowLeft: 'left', ArrowRight: 'right'};
+  document.addEventListener('keydown', event => {
+    if (!keys[event.key] || document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+    event.preventDefault(); if (!event.repeat) startMove(keys[event.key]);
+  });
+  document.addEventListener('keyup', event => { if (keys[event.key] && heldAction) { event.preventDefault(); stopMove(); } });
+  window.addEventListener('blur', stopMove);
+  window.addEventListener('pagehide', stopMove);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) stopMove(); });
+}
+
+buildRobots();
+buildControls();
+buildPad();
+refresh();
+setInterval(refresh, 1000);
+</script>
+</body>
+</html>

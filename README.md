@@ -6,7 +6,7 @@ We are preparing three short demonstrations in **Dutch**:
 
 | Robot | Demonstration | What visitors experience |
 | --- | --- | --- |
-| **ARI** | Healthcare | A supportive conversation and an appropriate handover to a caregiver. |
+| **ARI** | Healthcare | ARI as the guide in the VUmc outpatient hall: it helps older visitors (also with dementia) find their way and hands over to a caregiver when needed. |
 | **QT** | Education | A mini tutoring session with feedback and hints. |
 | **Furhat** | Introduction | A welcome: who we are, our FOAF project on ARI, and where to go next (ARI and QT). |
 
@@ -30,6 +30,9 @@ social_robots_demo/
 │   ├── __init__.py
 │   ├── qtrobot.py           # QT-specific code
 │   └── llm_test.py
+├── hub/
+│   ├── server.py            # Robot hub: start the robots and drive ARI from an iPad
+│   └── page.html            # The iPad page (black and white, Ubuntu font)
 ├── shared/
 │   ├── __init__.py
 │   ├── llm.py               # Shared Mistral API wrapper
@@ -104,4 +107,36 @@ No robot nearby? Only `MISTRAL_API_KEY` is needed for these:
 ```powershell
 python -m furhat.furhat --mic    # talk with your laptop's microphone; the reply is spoken (macOS)
 python -m furhat.furhat --text   # type instead of talking
-``` The persona and rules are in `SYSTEM_PROMPT` at the top of `furhat/furhat.py`.
+```
+
+The persona and rules are in `SYSTEM_PROMPT` at the top of `furhat/furhat.py`.
+
+## 3. Robot hub: everything from an iPad
+
+The hub is one page with a button per robot (ARI, QT, Furhat) that starts or
+stops its demo with one tap, plus everything to drive ARI: the conversation
+as it happens, staff alerts, faces, gestures, a handshake, the dance and other
+emotes, typed lines for ARI to say, the arrow pad and volume.
+
+On the demo laptop, double-click `start_hub.bat`, or from the project root:
+
+```powershell
+python -m hub
+```
+
+It prints the address to open on the iPad, for example
+`http://192.168.1.20:8080`. The iPad must be on the same wifi as the laptop.
+In Safari, tap Share and **Add to Home Screen** to open it full screen like an
+app. Windows asks once to let Python through the firewall; allow it for
+private networks.
+
+Each robot runs exactly as when you start it by hand: ARI and QT through their
+start scripts, Furhat with `python -m furhat.furhat_test`. Stopping from the
+iPad is the same as pressing Ctrl+C in its window, so the robots still shut
+down cleanly. Ctrl+C in the hub's own window stops the hub and every robot it
+started. The **Log** button on a card shows that robot's output.
+
+ARI's card has a switch between **Gids VUmc** (the guide, default) and
+**Gesprek** (the open conversation demo). The first time ARI starts after this
+update, its card offers **Sidecar bijwerken**, which runs
+`ari\ari_save_social.ps1` for you; then press **Start ARI** again.
