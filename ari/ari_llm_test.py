@@ -2,12 +2,14 @@
 
 Run from the repository root with::
 
-    python -m ari.ari_llm_test
+    python -m ari.ari_llm_test                    # the VUmc guide
+    python -m ari.ari_llm_test --mode companion   # the open conversation demo
 """
 
-from ari import prompts
-from ari.responses import ConversationEngine, ConversationTurn
-from shared.llm import LLM
+import argparse
+
+from ari.engines import MODES, build_engine
+from ari.responses import ConversationTurn
 
 
 def print_turn(turn: ConversationTurn) -> None:
@@ -20,15 +22,26 @@ def print_turn(turn: ConversationTurn) -> None:
         if diagnostic in post_speech:
             continue
         print(diagnostic)
-    for utterance in turn.utterances:
-        print(f"ARI: {utterance}")
+    actions = getattr(turn, "actions", ())
+    for index, utterance in enumerate(turn.utterances):
+        action = actions[index] if index < len(actions) else {}
+        extras = ", ".join(
+            f"{key}={value}" for key, value in action.items() if value
+        )
+        print(f"ARI: {utterance}" + (f"   ({extras})" if extras else ""))
     for diagnostic in post_speech:
         print(diagnostic)
 
 
 def main() -> None:
-    engine = ConversationEngine(LLM(system_prompt=prompts.SYSTEM_PROMPT))
+    parser = argparse.ArgumentParser(description="Talk to ARI's conversation by typing.")
+    parser.add_argument("--mode", choices=MODES, default="guardian")
+    args = parser.parse_args()
+
+    engine = build_engine(args.mode)
     print_turn(engine.start())
+    if args.mode == "guardian":
+        print("(ARI staat in standby. Begin met bijvoorbeeld 'Hallo' of 'Waar is de apotheek?')")
 
     while not engine.is_done:
         visitor_text = input("Bezoeker: ").strip()

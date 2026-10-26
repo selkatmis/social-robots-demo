@@ -1,17 +1,25 @@
 """Small ROS sidecar for ARI social attention, expressions and manual base control.
 
 Run this on ARI alongside (not instead of) the existing RoboBOND proxy.  It
-never publishes head or gaze targets and never touches the tablet.
+never publishes gaze targets and never touches the tablet. The head is only
+moved directly during an operator emote (such as the dance); attention is
+paused for that and comes back on its own a few seconds after the last move.
 """
 
 from __future__ import annotations
 
 import argparse
+import array
 import logging
 import math
+import os
+import random
+import shutil
 import signal
+import subprocess
 import threading
 import time
+import wave
 from typing import Any
 
 from flask import Flask, jsonify, request
@@ -20,9 +28,14 @@ from flask import Flask, jsonify, request
 # Adjustable behavior and safety parameters.
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 7343
-SIDECAR_VERSION = "ari-social-v0.3.4-brief-face-smile"
+SIDECAR_VERSION = "ari-social-v0.4.0-guardian-emotes"
 ATTENTION_SERVICE = "/attention_manager/set_policy"
 ENABLE_NECK_SERVICE = "/gaze_manager/enable_neck"
+DISABLE_NECK_SERVICE = "/gaze_manager/disable_neck"
+HEAD_TOPIC = "/head_controller/command"
+HEAD_JOINTS = ("head_1_joint", "head_2_joint")
+ODOM_TOPIC = "/mobile_base_controller/odom"
+VOLUME_PARAM = "/pal/playback_volume"
 FACE_TOPIC = "/humans/faces/tracked"
 PERSON_TOPIC = "/humans/persons/tracked"
 EXPRESSION_TOPIC = "/robot_face/expression"
@@ -54,6 +67,34 @@ MAX_ANGULAR_RADIANS_PER_SECOND = 0.5
 LINEAR_RAMP_PER_TICK = 0.015
 ANGULAR_RAMP_PER_TICK = 0.045
 
+# Operator actions (emotes, handshake, face buttons).
+EXPRESSIONS = {
+    "neutral",
+    "happy",
+    "sad",
+    "surprised",
+    "excited",
+    "confused",
+    "embarrassed",
+    "skeptical",
+    "angry",
+}
+MAX_EXPRESSION_OVERRIDE_SECONDS = 60.0
+MAX_HEAD_PAN_DEGREES = 72.0
+MAX_HEAD_TILT_UP_DEGREES = 14.0
+MAX_HEAD_TILT_DOWN_DEGREES = 24.0
+MANUAL_HEAD_HOLD_SECONDS = 3.0
+MAX_TURN_DEGREES = 180.0
+MAX_DRIVE_METERS = 0.5
+MAX_BACKWARD_DRIVE_METERS = 0.3
+MOTION_EXTRA_SECONDS = 3.0
+ODOM_STALE_SECONDS = 0.5
+NEAREST_CONE_DEGREES = 25.0
+MIN_VOLUME_PERCENT = 30
+MAX_VOLUME_PERCENT = 100
+MUSIC_FILES = ("~/dance.wav", "~/StillDRE.wav")
+GENERATED_TUNE_PATH = "/tmp/ari_dance_tune.wav"
+
 DISABLED = 0
 RANDOM = 1
 IDLE_SOCIAL = 2
@@ -78,6 +119,180 @@ LOGGER = logging.getLogger(__name__)
 
 def clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
+
+
+def wrap_angle(angle: float) -> float:
+    return (angle + math.pi) % (2 * math.pi) - math.pi
+
+
+def yaw_from_quaternion(orientation: Any) -> float:
+    q = orientation
+    return math.atan2(
+        2.0 * (q.w * q.z + q.x * q.y),
+        1.0 - 2.0 * (q.y * q.y + q.z * q.z),
+    )
+
+
+def write_dance_tune(path: str, rate: int = 22050) -> None:
+    """Write a short cheerful loop, so the dance has music without a wav file."""
+    beat = 60.0 / 124.0
+    eighth = beat / 2.0
+    melody = (
+        72, 76, 79, 76, 72, 76, 79, 84,
+        77, 81, 84, 81, 77, 81, 79, 77,
+        79, 83, 86, 83, 79, 77, 76, 74,
+        76, 72, 76, 79, 84, None, 84, None,
+        76, 72, 69, 72, 76, 79, 81, 79,
+        77, 81, 77, 72, 77, 81, 84, 81,
+        79, 74, 79, 83, 86, 83, 79, 77,
+        76, 79, 84, 79, 72, None, 72, None,
+    )
+    roots = (48, 41, 43, 48, 45, 41, 43, 48)
+    total = int(len(melody) * eighth * rate)
+    samples = array.array("h", [0]) * total
+    noise = random.Random(7)
+
+    def frequency(note: int) -> float:
+        return 440.0 * 2.0 ** ((note - 69) / 12.0)
+
+    def add_note(start: float, length: float, note: int, level: float, square: bool) -> None:
+        first = int(start * rate)
+        count = int(length * rate)
+        step = frequency(note) / rate
+        phase = 0.0
+        for index in range(count):
+            position = first + index
+            if position >= total:
+                break
+            attack = min(1.0, index / 200.0)
+            release = min(1.0, (count - index) / 600.0)
+            if square:
+                wave_value = 1.0 if phase < 0.5 else -1.0
+            else:
+                wave_value = 4.0 * abs(phase - 0.5) - 1.0
+            value = samples[position] + int(level * attack * release * wave_value)
+            samples[position] = max(-32000, min(32000, value))
+            phase = (phase + step) % 1.0
+
+    for index, note in enumerate(melody):
+        if note is not None:
+            add_note(index * eighth, eighth * 0.9, note, 4200, True)
+    for bar, root in enumerate(roots):
+        for quarter, offset in enumerate((0, 7, 12, 7)):
+            add_note((bar * 4 + quarter) * beat, beat * 0.8, root + offset, 7000, False)
+    for quarter in range(len(melody) // 2):
+        first = int(quarter * beat * rate)
+        for index in range(int(0.12 * rate)):
+            position = first + index
+            if position >= total:
+                break
+            kick = math.sin(2 * math.pi * (60.0 + 90.0 * math.exp(-index / 300.0)) * index / rate)
+            value = samples[position] + int(9000 * math.exp(-index / 1500.0) * kick)
+            samples[position] = max(-32000, min(32000, value))
+        off_beat = int((quarter * beat + eighth) * rate)
+        for index in range(int(0.03 * rate)):
+            position = off_beat + index
+            if position >= total:
+                break
+            hat = noise.uniform(-1.0, 1.0) * 1800 * math.exp(-index / 120.0)
+            samples[position] = max(-32000, min(32000, samples[position] + int(hat)))
+
+    temporary = f"{path}.part"
+    with wave.open(temporary, "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(rate)
+        output.writeframes(samples.tobytes())
+    os.replace(temporary, path)
+
+
+class MusicPlayer:
+    """Loops dance music through ARI's speaker while an emote asks for it."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._process: Any = None
+        self.source: str | None = None
+
+    @staticmethod
+    def find_source() -> str | None:
+        for candidate in MUSIC_FILES:
+            path = os.path.expanduser(candidate)
+            if os.path.isfile(path):
+                return path
+        if not os.path.isfile(GENERATED_TUNE_PATH):
+            write_dance_tune(GENERATED_TUNE_PATH)
+        return GENERATED_TUNE_PATH
+
+    @staticmethod
+    def player_command(path: str) -> list[str] | None:
+        if shutil.which("paplay"):
+            return ["paplay", "--volume=65536", path]
+        if shutil.which("aplay"):
+            return ["aplay", "-q", path]
+        return None
+
+    @property
+    def playing(self) -> bool:
+        thread = self._thread
+        return thread is not None and thread.is_alive() and not self._stop.is_set()
+
+    def start(self) -> bool:
+        with self._lock:
+            if self.playing:
+                return True
+            self._stop.clear()
+            self._thread = threading.Thread(
+                target=self._loop,
+                name="ari-dance-music",
+                daemon=True,
+            )
+            self._thread.start()
+        return True
+
+    def _loop(self) -> None:
+        try:
+            path = self.find_source()
+        except Exception as error:
+            LOGGER.warning("No dance music available: %s", error)
+            return
+        command = self.player_command(path) if path else None
+        if command is None:
+            LOGGER.warning("Neither paplay nor aplay is installed; dancing without music")
+            return
+        self.source = path
+        while not self._stop.is_set():
+            self._process = subprocess.Popen(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            code = self._process.wait()
+            self._process = None
+            if self._stop.is_set():
+                break
+            if code:
+                LOGGER.warning("%s exited with %s; stopping the music", command[0], code)
+                break
+
+    def stop(self) -> None:
+        with self._lock:
+            self._stop.set()
+            process = self._process
+            if process is not None:
+                try:
+                    process.terminate()
+                    process.wait(timeout=1.0)
+                except Exception:
+                    try:
+                        process.kill()
+                    except Exception:
+                        pass
+            thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=2.0)
 
 
 class FaceHysteresis:
@@ -203,6 +418,13 @@ class ARISocialROSBridge:
             # physically inspected ARI reported attention_manager_msgs.
             from attention_manager.srv import SetPolicy
 
+        try:
+            from nav_msgs.msg import Odometry
+            from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+        except ImportError as error:
+            Odometry = JointTrajectory = JointTrajectoryPoint = None
+            LOGGER.warning("Head moves and odometry are off: %s", error)
+
         self.rospy = rospy
         self.Twist = Twist
         self.Expression = Expression
@@ -239,6 +461,18 @@ class ARISocialROSBridge:
         self._current_linear = 0.0
         self._current_angular = 0.0
         self._velocity_was_active = False
+        self.JointTrajectory = JointTrajectory
+        self.JointTrajectoryPoint = JointTrajectoryPoint
+        self._expression_override: str | None = None
+        self._expression_override_until = 0.0
+        self._manual_head = False
+        self._manual_head_until = 0.0
+        self._odom: Any = None
+        self._odom_at = 0.0
+        self._motion_lock = threading.Lock()
+        self._motion_abort = threading.Event()
+        self._motion_kind: str | None = None
+        self._music = MusicPlayer()
 
         rospy.init_node("ari_social_control", anonymous=True)
         self._expression_pub = rospy.Publisher(
@@ -256,6 +490,13 @@ class ARISocialROSBridge:
         rospy.Subscriber(SCAN_TOPIC, LaserScan, self._on_scan, queue_size=1)
         rospy.Subscriber(DEPTH_TOPIC, Image, self._on_depth, queue_size=1)
         rospy.Subscriber(EMERGENCY_TOPIC, Bool, self._on_emergency, queue_size=1)
+        self._head_pub = None
+        if JointTrajectory is not None:
+            self._head_pub = rospy.Publisher(
+                HEAD_TOPIC, JointTrajectory, queue_size=1
+            )
+        if Odometry is not None:
+            rospy.Subscriber(ODOM_TOPIC, Odometry, self._on_odom, queue_size=1)
         self._tf = tf.TransformListener()
 
         self._attention_service = None
@@ -280,6 +521,24 @@ class ARISocialROSBridge:
         except Exception as error:
             self._neck_error = f"enable-neck service unavailable: {error}"
             LOGGER.warning(self._neck_error)
+
+        # Not every PAL release has this one; without it the head moves of an
+        # emote still work, the gaze manager just gets paused through attention.
+        self._disable_neck_service = None
+        try:
+            rospy.wait_for_service(DISABLE_NECK_SERVICE, timeout=1.0)
+            self._disable_neck_service = rospy.ServiceProxy(
+                DISABLE_NECK_SERVICE,
+                Empty,
+            )
+        except Exception:
+            LOGGER.info("No %s service; emote head moves only pause attention", DISABLE_NECK_SERVICE)
+
+        threading.Thread(
+            target=self._prepare_music,
+            name="ari-dance-music-prepare",
+            daemon=True,
+        ).start()
 
         self.set_mode(False)
         self._thread = threading.Thread(
@@ -319,6 +578,19 @@ class ARISocialROSBridge:
             self._emergency = bool(message.data)
             if self._emergency:
                 self._movement.stop()
+
+    def _on_odom(self, message: Any) -> None:
+        with self._lock:
+            self._odom = message
+            self._odom_at = time.monotonic()
+
+    def _prepare_music(self) -> None:
+        # Writing the fallback tune takes a second or two, so do it before the
+        # first dance instead of during it.
+        try:
+            MusicPlayer.find_source()
+        except Exception as error:
+            LOGGER.warning("Could not prepare the dance tune: %s", error)
 
     def _call_policy(self, policy: int, frame: str = "") -> bool:
         if self._attention_service is None:
@@ -383,6 +655,10 @@ class ARISocialROSBridge:
         with self._lock:
             self._conversation_active = bool(conversation_active)
             self._speaking = False
+            if getattr(self, "_manual_head", False):
+                # An emote owns the head right now; attention for this mode is
+                # switched on when the emote's head hold ends.
+                return True
             self._enable_neck()
             if conversation_active:
                 target = self._verified_person_frame(time.monotonic())
@@ -413,6 +689,9 @@ class ARISocialROSBridge:
             stable_face and not self._conversation_active,
             now,
         )
+        override = getattr(self, "_expression_override", None)
+        if override and now < getattr(self, "_expression_override_until", 0.0):
+            return override
         return desired_expression(
             self._conversation_active,
             self._speaking,
@@ -523,6 +802,10 @@ class ARISocialROSBridge:
     def command_move(self, action: str) -> bool:
         if action not in MOVE_COMMANDS:
             return False
+        abort = getattr(self, "_motion_abort", None)
+        if abort is not None:
+            # The arrow pad and the stop button always win over an emote's turn.
+            abort.set()
         with self._lock:
             if action == "stop":
                 self.stop_movement()
@@ -590,7 +873,7 @@ class ARISocialROSBridge:
 
     def _update_focus(self, now: float) -> None:
         with self._lock:
-            if not self._conversation_active:
+            if not self._conversation_active or getattr(self, "_manual_head", False):
                 return
             target = self._verified_person_frame(now)
             if (
@@ -602,11 +885,248 @@ class ARISocialROSBridge:
             ):
                 self._call_policy(FOCUSED_SOCIAL, target)
 
+    def set_expression_override(self, expression: str | None, seconds: float) -> bool:
+        """Show one face for a while (operator button, emote, ARI's reply)."""
+        name = str(expression or "").strip().lower()
+        with self._lock:
+            if not name or seconds <= 0:
+                self._expression_override = None
+                self._expression_override_until = 0.0
+            elif name in EXPRESSIONS:
+                self._expression_override = name
+                self._expression_override_until = time.monotonic() + clamp(
+                    seconds, 0.5, MAX_EXPRESSION_OVERRIDE_SECONDS
+                )
+            else:
+                return False
+        self._update_expression(time.monotonic(), force=True)
+        return True
+
+    def _disable_neck(self) -> None:
+        service = getattr(self, "_disable_neck_service", None)
+        if service is None:
+            return
+        try:
+            service()
+            self._neck_enabled = False
+        except Exception as error:
+            LOGGER.warning("Could not pause gaze-manager neck control: %s", error)
+
+    def command_head(self, pan: float, tilt: float, duration: float) -> bool:
+        if self._head_pub is None:
+            return False
+        pan = clamp(pan, -MAX_HEAD_PAN_DEGREES, MAX_HEAD_PAN_DEGREES)
+        tilt = clamp(tilt, -MAX_HEAD_TILT_DOWN_DEGREES, MAX_HEAD_TILT_UP_DEGREES)
+        duration = clamp(duration, 0.2, 5.0)
+        with self._lock:
+            now = time.monotonic()
+            if not self._manual_head:
+                self._manual_head = True
+                self._call_policy(DISABLED, "")
+                self._disable_neck()
+            self._manual_head_until = now + duration + MANUAL_HEAD_HOLD_SECONDS
+            message = self.JointTrajectory()
+            message.joint_names = list(HEAD_JOINTS)
+            point = self.JointTrajectoryPoint()
+            # head_2_joint is flipped on ARI: a positive angle tips the nose down.
+            point.positions = [math.radians(pan), math.radians(-tilt)]
+            point.time_from_start = self.rospy.Duration(duration)
+            message.points = [point]
+            self._head_pub.publish(message)
+        return True
+
+    def _update_manual_head(self, now: float) -> None:
+        with self._lock:
+            if not self._manual_head or now < self._manual_head_until:
+                return
+            self._manual_head = False
+            self._enable_neck()
+            if self._conversation_active:
+                self._call_policy(FOCUSED_SOCIAL, self._verified_person_frame(now))
+            else:
+                self._attention_target = None
+                self._call_policy(IDLE_SOCIAL, "")
+
+    def _odom_pose(self, now: float) -> tuple[float, float, float] | None:
+        message = self._odom
+        if message is None or now - self._odom_at > ODOM_STALE_SECONDS:
+            return None
+        pose = message.pose.pose
+        return (
+            pose.position.x,
+            pose.position.y,
+            yaw_from_quaternion(pose.orientation),
+        )
+
+    def _blocking_motion(
+        self,
+        kind: str,
+        linear: float,
+        angular: float,
+        goal: float,
+    ) -> dict[str, Any]:
+        """Turn (goal in radians) or drive (goal in meters) through the guarded velocity loop."""
+        if not self._motion_lock.acquire(timeout=0.5):
+            return {"ok": False, "progress": 0.0, "reason": "busy"}
+        speed = linear if kind == "drive" else angular
+        direction = 1.0 if speed > 0 else -1.0
+        progress = 0.0
+        reason = "done"
+        try:
+            self._motion_abort.clear()
+            with self._lock:
+                # Start from standstill so the previous step's speed can't
+                # count towards this one.
+                self.stop_movement()
+                self._motion_kind = kind
+                last_pose = self._odom_pose(time.monotonic())
+            last_time = time.monotonic()
+            deadline = last_time + goal / abs(speed) + MOTION_EXTRA_SECONDS
+            while progress < goal:
+                now = time.monotonic()
+                if self._motion_abort.is_set():
+                    reason = "stopped"
+                    break
+                if now >= deadline:
+                    reason = "timeout"
+                    break
+                with self._lock:
+                    if not self.movement_available(now):
+                        reason = "unavailable"
+                        break
+                    if linear > 0.0 and self._forward_clear(now) is False:
+                        reason = "blocked"
+                        break
+                    self._movement.set(linear, angular, now)
+                if self._stop.wait(CONTROL_PERIOD_SECONDS):
+                    reason = "stopped"
+                    break
+                now = time.monotonic()
+                with self._lock:
+                    pose = self._odom_pose(now)
+                    velocity = (
+                        self._current_linear if kind == "drive" else self._current_angular
+                    )
+                if pose is not None and last_pose is not None:
+                    if kind == "turn":
+                        progress += direction * wrap_angle(pose[2] - last_pose[2])
+                    else:
+                        dx = pose[0] - last_pose[0]
+                        dy = pose[1] - last_pose[1]
+                        progress += direction * (
+                            dx * math.cos(pose[2]) + dy * math.sin(pose[2])
+                        )
+                else:
+                    progress += direction * velocity * (now - last_time)
+                last_pose = pose
+                last_time = now
+        finally:
+            with self._lock:
+                if self._movement.linear == linear and self._movement.angular == angular:
+                    self._movement.stop()
+                self._motion_kind = None
+            self._motion_lock.release()
+        return {"ok": reason == "done", "progress": max(0.0, progress), "reason": reason}
+
+    def turn(self, degrees: float) -> dict[str, Any]:
+        degrees = clamp(degrees, -MAX_TURN_DEGREES, MAX_TURN_DEGREES)
+        if abs(degrees) < 1.0:
+            return {"ok": True, "turned": 0.0, "reason": "done"}
+        angular = math.copysign(MAX_ANGULAR_RADIANS_PER_SECOND, degrees)
+        result = self._blocking_motion("turn", 0.0, angular, math.radians(abs(degrees)))
+        turned = math.copysign(math.degrees(result["progress"]), degrees)
+        return {"ok": result["ok"], "turned": round(turned, 1), "reason": result["reason"]}
+
+    def drive(self, meters: float) -> dict[str, Any]:
+        meters = clamp(meters, -MAX_BACKWARD_DRIVE_METERS, MAX_DRIVE_METERS)
+        if abs(meters) < 0.01:
+            return {"ok": True, "driven": 0.0, "reason": "done"}
+        linear = (
+            MAX_FORWARD_METERS_PER_SECOND
+            if meters > 0
+            else -MAX_BACKWARD_METERS_PER_SECOND
+        )
+        result = self._blocking_motion("drive", linear, 0.0, abs(meters))
+        driven = math.copysign(result["progress"], meters)
+        return {"ok": result["ok"], "driven": round(driven, 3), "reason": result["reason"]}
+
+    def set_music(self, on: bool) -> bool:
+        if on:
+            return self._music.start()
+        self._music.stop()
+        return False
+
+    def volume(self, percent: float | None = None) -> int | None:
+        if percent is not None:
+            value = int(clamp(round(percent), MIN_VOLUME_PERCENT, MAX_VOLUME_PERCENT))
+            self.rospy.set_param(VOLUME_PARAM, value)
+        try:
+            return int(self.rospy.get_param(VOLUME_PARAM))
+        except Exception:
+            return None
+
+    def _laser_nearest(self) -> float | None:
+        nearest = None
+        for index, distance in enumerate(self._scan.ranges):
+            angle = self._scan.angle_min + index * self._scan.angle_increment
+            if abs(math.degrees(angle)) > NEAREST_CONE_DEGREES:
+                continue
+            if not math.isfinite(distance) or distance <= 0.0:
+                continue
+            if nearest is None or distance < nearest:
+                nearest = distance
+        return nearest
+
+    def _depth_nearest(self) -> float | None:
+        message = self._depth
+        np = self._numpy
+        if message is None or np is None:
+            return None
+        if message.encoding in ("16UC1", "mono16"):
+            dtype, scale = np.uint16, 0.001
+        elif message.encoding == "32FC1":
+            dtype, scale = np.float32, 1.0
+        else:
+            return None
+        if message.is_bigendian:
+            dtype = np.dtype(dtype).newbyteorder(">")
+        try:
+            row_width = message.step // np.dtype(dtype).itemsize
+            image = np.frombuffer(message.data, dtype=dtype).reshape(
+                message.height,
+                row_width,
+            )
+            image = image[:, : message.width].astype(np.float32) * scale
+        except (TypeError, ValueError):
+            return None
+        top = int(message.height * DEPTH_BAND_TOP_FRACTION)
+        bottom = int(message.height * DEPTH_BAND_BOTTOM_FRACTION)
+        half_cone = int(message.width * NEAREST_CONE_DEGREES / DEPTH_FOV_DEGREES)
+        center = message.width // 2
+        band = image[top:bottom, max(0, center - half_cone) : center + half_cone]
+        values = band[
+            np.isfinite(band)
+            & (band > DEPTH_MIN_VALID_METERS)
+            & (band < DEPTH_MAX_VALID_METERS)
+        ]
+        return float(np.min(values)) if values.size else None
+
+    def nearest_ahead(self) -> tuple[float | None, str]:
+        """Closest thing in front of ARI, used to notice a hand for a handshake."""
+        now = time.monotonic()
+        with self._lock:
+            if self._scan_is_fresh(now):
+                return self._laser_nearest(), "laser"
+            if self._numpy is not None and self._depth_is_fresh(now):
+                return self._depth_nearest(), "depth"
+        return None, "none"
+
     def _loop(self) -> None:
         while not self._stop.wait(CONTROL_PERIOD_SECONDS):
             now = time.monotonic()
             try:
                 self._update_expression(now)
+                self._update_manual_head(now)
                 self._update_focus(now)
                 self._update_movement(now)
             except Exception as error:
@@ -648,12 +1168,33 @@ class ARISocialROSBridge:
                 "base_subscribers": self._velocity_pub.get_num_connections(),
                 "emergency": self._emergency,
                 "tablet_controlled": False,
+                "expression_override": self._expression_override
+                if now < self._expression_override_until
+                else None,
+                "manual_head": self._manual_head,
+                "motion_active": self._motion_kind,
+                "music_playing": self._music.playing,
+                "head_available": self._head_pub is not None,
+                "odometry": self._odom_pose(now) is not None,
+                "capabilities": [
+                    "expression_override",
+                    "head",
+                    "turn",
+                    "drive",
+                    "music",
+                    "volume",
+                    "nearest",
+                ],
             }
 
     def close(self) -> None:
         self._stop.set()
+        self._motion_abort.set()
+        self._music.stop()
         self.stop_movement()
         with self._lock:
+            self._expression_override = None
+            self._manual_head = False
             self._conversation_active = False
             self._speaking = False
             self._face_ids = ()
@@ -704,6 +1245,65 @@ def create_app(bridge: Any) -> Flask:
         result = bridge.snapshot()
         result["command_ok"] = bool(success)
         return jsonify(result)
+
+    def number(body: dict[str, Any], key: str, default: float) -> float:
+        try:
+            value = float(body.get(key, default))
+        except (TypeError, ValueError):
+            return default
+        return value if math.isfinite(value) else default
+
+    @app.route("/expression", methods=["POST"])
+    def expression() -> Any:
+        body = request.get_json(force=True, silent=True) or {}
+        success = bridge.set_expression_override(
+            body.get("expression"),
+            number(body, "seconds", 5.0),
+        )
+        return jsonify({"ok": bool(success), "expression": body.get("expression")})
+
+    @app.route("/head", methods=["POST"])
+    def head() -> Any:
+        body = request.get_json(force=True, silent=True) or {}
+        success = bridge.command_head(
+            number(body, "pan", 0.0),
+            number(body, "tilt", 0.0),
+            number(body, "duration", 0.5),
+        )
+        return jsonify({"ok": bool(success)})
+
+    @app.route("/turn", methods=["POST"])
+    def turn() -> Any:
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(bridge.turn(number(body, "degrees", 0.0)))
+
+    @app.route("/drive", methods=["POST"])
+    def drive() -> Any:
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(bridge.drive(number(body, "meters", 0.0)))
+
+    @app.route("/music", methods=["POST"])
+    def music() -> Any:
+        body = request.get_json(force=True, silent=True) or {}
+        playing = bridge.set_music(bool(body.get("on")))
+        return jsonify({"ok": True, "playing": bool(playing)})
+
+    @app.route("/volume", methods=["GET", "POST"])
+    def volume() -> Any:
+        percent = None
+        if request.method == "POST":
+            body = request.get_json(force=True, silent=True) or {}
+            percent = number(body, "percent", 80.0)
+        try:
+            current = bridge.volume(percent)
+        except Exception as error:
+            return jsonify({"ok": False, "percent": None, "error": str(error)})
+        return jsonify({"ok": True, "percent": current})
+
+    @app.route("/nearest", methods=["GET"])
+    def nearest() -> Any:
+        distance, sensor = bridge.nearest_ahead()
+        return jsonify({"ok": True, "distance": distance, "sensor": sensor})
 
     return app
 

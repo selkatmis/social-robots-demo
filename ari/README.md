@@ -1,5 +1,56 @@
 # ARI demo: social attention and operator UI
 
+## Two conversations
+
+ARI runs one of two conversations, both in Dutch:
+
+- **guardian** (default): ARI is the guide in the central hall of the VUmc
+  outpatient building. It helps older visitors, some with dementia, find
+  their way and answers practical questions: short sentences, one step at a
+  time, patient with repeated questions, and the date and time when someone
+  is disoriented. When a visitor is confused, upset, looking for someone,
+  wants to be accompanied or has an urgent problem, ARI says it is getting a
+  staff member and the operator page shows an alert (**Ik kom eraan** lets ARI
+  tell the visitor someone is coming). After 60 seconds without speech ARI
+  forgets the visitor and goes back to standby.
+- **companion**: the open conversation (`responses.py`, `prompts.py`).
+
+```powershell
+python -m ari.ari_mic_test --ui                    # guardian
+python -m ari.ari_mic_test --ui --mode companion   # open conversation
+python -m ari.ari_llm_test                         # type instead of talking
+```
+
+The guide's wording and rules are in `guardian_prompts.py`, the conversation
+logic in `guardian.py`. Everything ARI knows about the hospital is in
+`vumc_info.txt` (checked against amsterdamumc.nl on 26 October 2026); ARI
+does not answer from anything else, so correct or extend that file.
+
+## Operator actions
+
+Besides the transcript, standby and the arrow pad, the operator server on
+port `8765` can greet a visitor, let ARI say a typed line, change the face,
+play a gesture (wave, nod, cheer), shake hands, play an emote and stop
+everything. The robot hub (`python -m hub`, see the main README) puts all of
+this on an iPad.
+
+Emotes are the hackathon's FOAF emotes, in `emotes.json`: steps such as
+`head 40 10 0.4`, `turn 30`, `gesture wave`, `say ...` and `music on`. The
+file explains each step and is read fresh every time, so a new emote shows up
+without a restart. The **Dans** has no driving on purpose, because people
+stand close to ARI at the stand. For the handshake ARI offers its right hand
+(`shake_right`) and watches the laser or torso camera for a hand within 70 cm.
+
+The sidecar version `ari-social-v0.4.0-guardian-emotes` adds what these need:
+a face that holds for a few seconds, head moves (attention pauses and comes
+back three seconds after the last one), turns and short drives measured with
+odometry, dance music on ARI's speaker (`~/dance.wav`, `~/StillDRE.wav`, or a
+tune it writes itself) and the speaker volume. Turns and drives go through the
+same guarded velocity loop as the arrow pad, and the arrow pad or the stop
+button always interrupts them. Deploy it once with `ari_save_social.ps1`.
+
+## Social sidecar
+
 The normal RoboBOND ARI proxy remains on port `7342`. The optional
 `ari_social_proxy.py` process runs beside it on port `7343` and controls only:
 
@@ -11,8 +62,9 @@ The normal RoboBOND ARI proxy remains on port `7342`. The optional
   newly acquired (and `happy` while ARI speaks during a conversation);
 - guarded, press-and-hold manual base movement.
 
-It does not publish head or gaze targets, replace RoboBOND, perform autonomous
-navigation, or open/change anything on ARI's tablet.
+Apart from the operator actions above, it does not publish head or gaze
+targets, replace RoboBOND, perform autonomous navigation, or open/change
+anything on ARI's tablet.
 
 Leave ARI's tablet on its existing **Main** page. This implementation makes no
 tablet navigation request, so it neither guesses a PAL page identifier nor

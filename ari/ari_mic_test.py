@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import queue
 import re
 import threading
@@ -16,8 +17,15 @@ from robond.core.listener_backend import ListenerBackend
 from robond.core.robot_interface import Expression
 from robond.robot.remote import RemoteRobotInterface
 
-from ari import prompts
-from ari.operator_ui import LocalOperatorServer, RuntimeCoordinator, UI_HOST, UI_PORT
+from ari.emotes import gesture_for
+from ari.engines import MODES, build_engine
+from ari.operator_ui import (
+    LocalOperatorServer,
+    RuntimeCoordinator,
+    SpeechLockedRobot,
+    UI_HOST,
+    UI_PORT,
+)
 from ari.responses import ConversationEngine, ConversationTurn
 from ari.social_control import ARISocialClient, CONTROL_PORT
 from shared.config import ARI_IP, REMOTE_PORT
@@ -28,6 +36,7 @@ from shared.mic import ContinuousMic, ContinuousMicError, MicEventType
 COOLDOWN_SECONDS = 0.4
 ROBOT_CONNECT_ATTEMPTS = 3
 MIC_START_ATTEMPTS = 2
+GUARDIAN_IDLE_SECONDS = 60.0
 
 # During the short microphone/speech overlap, acoustic isolation can still let
 # part of ARI's own voice through. Keep a brief history and reject only close,
@@ -117,7 +126,27 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=CONTROL_PORT,
         help="optional ARI ROS social-control sidecar port",
     )
+    parser.add_argument(
+        "--mode",
+        choices=MODES,
+        default=os.environ.get("ARI_MODE") if os.environ.get("ARI_MODE") in MODES else "guardian",
+        help="guardian: the VUmc guide; companion: the open conversation demo "
+        "(the robot hub passes its choice in ARI_MODE)",
+    )
+    parser.add_argument(
+        "--idle-seconds",
+        type=float,
+        help="forget the visitor after this long without speech "
+        f"(guardian default {GUARDIAN_IDLE_SECONDS:.0f}, companion off; 0 turns it off)",
+    )
     return parser.parse_args(argv)
+
+
+def idle_seconds_for(args: argparse.Namespace) -> float | None:
+    value = getattr(args, "idle_seconds", None)
+    if value is None:
+        return GUARDIAN_IDLE_SECONDS if getattr(args, "mode", "companion") == "guardian" else None
+    return value or None
 
 
 def print_devices() -> None:
@@ -417,15 +446,23 @@ class SpeechDurationEstimator:
         )
 
 
+def _speak_once(robot: Any, utterance: str, gesture: Any = None) -> None:
+    if gesture is not None:
+        robot.coordinated_action(utterance, gesture=gesture)
+    else:
+        robot.say(utterance)
+
+
 def _say_and_measure(
     robot: Any,
     utterance: str,
     timing: SpeechDurationEstimator,
     console_print: Callable[..., None],
+    gesture: Any = None,
 ) -> None:
     started = time.monotonic()
     try:
-        robot.say(utterance)
+        _speak_once(robot, utterance, gesture)
     except Exception as error:
         console_print(f"[ARI SPEECH ERROR] {error}")
     finally:
@@ -439,6 +476,7 @@ def _say_with_prelisten(
     timing: SpeechDurationEstimator,
     console_print: Callable[..., None],
     should_continue: Callable[[], bool],
+    gesture: Any = None,
 ) -> None:
     """Speak asynchronously and prime the mic near the predicted ending."""
     completed = threading.Event()
@@ -447,7 +485,7 @@ def _say_with_prelisten(
 
     def run_speech() -> None:
         try:
-            robot.say(utterance)
+            _speak_once(robot, utterance, gesture)
         except Exception as error:
             speech_errors.append(error)
         finally:
@@ -492,6 +530,7 @@ def speak_turn(
     should_continue: Callable[[], bool] | None = None,
     on_speech_start: Callable[[str], bool | None] | None = None,
     on_speech_end: Callable[[], None] | None = None,
+    on_utterance_face: Callable[[dict[str, Any], float], None] | None = None,
 ) -> None:
     """Speak a turn and pre-listen during its final expected-response prompt."""
     timing = timing or SpeechDurationEstimator()
@@ -507,11 +546,16 @@ def speak_turn(
             continue
         console_print(diagnostic)
     final_index = len(turn.utterances) - 1
+    actions = getattr(turn, "actions", ())
     for index, utterance in enumerate(turn.utterances):
         if not should_continue():
             break
         if on_speech_start is not None and on_speech_start(utterance) is False:
             break
+        action = actions[index] if index < len(actions) else {}
+        gesture = gesture_for(action.get("gesture"))
+        if on_utterance_face is not None and action.get("expression"):
+            on_utterance_face(action, timing.estimate(utterance) + 1.0)
         note_utterance = getattr(microphone_input, "note_robot_utterance", None)
         set_robot_speaking = getattr(
             microphone_input,
@@ -536,10 +580,11 @@ def speak_turn(
                     timing,
                     console_print,
                     should_continue,
+                    gesture,
                 )
             else:
                 console_print("[SPEAKING] ARI is speaking; microphone is stopped.")
-                _say_and_measure(robot, utterance, timing, console_print)
+                _say_and_measure(robot, utterance, timing, console_print, gesture)
         finally:
             # Timestamp the memory at playback completion so even a longer ARI
             # utterance remains available while its final audio is transcribed.
@@ -572,6 +617,9 @@ def main(args: argparse.Namespace | None = None) -> int:
         print(f"[ARI CONNECTION ERROR] {error}")
         return 1
     print("ARI connected.")
+    robot = SpeechLockedRobot(robot)
+    mode = getattr(args, "mode", "companion")
+    print(f"ARI mode: {mode}")
 
     try:
         microphone = ContinuousMic(
@@ -579,7 +627,11 @@ def main(args: argparse.Namespace | None = None) -> int:
             vad="silero",
             model_size="small",
             language="nl",
-            hotwords="ARI QT FURHAT",
+            hotwords=(
+                "ARI VUmc Amsterdam UMC polikliniek"
+                if mode == "guardian"
+                else "ARI QT FURHAT"
+            ),
             enable_partials=False,
             end_silence_ms=800,
         )
@@ -593,7 +645,7 @@ def main(args: argparse.Namespace | None = None) -> int:
     runtime: RuntimeCoordinator | None = None
     ui_server: LocalOperatorServer | None = None
     try:
-        engine = ConversationEngine(LLM(system_prompt=prompts.SYSTEM_PROMPT))
+        engine = build_engine(mode, LLM)
 
         def expression_fallback(name: str) -> None:
             robot.set_expression(Expression(name))
@@ -611,6 +663,8 @@ def main(args: argparse.Namespace | None = None) -> int:
             robot,
             microphone_input,
             social_control,
+            mode=mode,
+            idle_seconds=idle_seconds_for(args),
         )
         if getattr(args, "ui", False):
             ui_server = LocalOperatorServer(
@@ -639,6 +693,7 @@ def main(args: argparse.Namespace | None = None) -> int:
                         utterance, turn_generation
                     ),
                     on_speech_end=lambda: runtime.end_speaking(turn_generation),
+                    on_utterance_face=runtime.show_utterance_face,
                 )
                 runtime.finish_turn(turn_generation)
             if not runtime.is_current(turn_generation):
@@ -681,6 +736,7 @@ def main(args: argparse.Namespace | None = None) -> int:
         # Keep the remote RoboBOND proxy alive; release only local mic resources.
         if runtime is not None:
             runtime.reset_to_standby()
+            runtime.close()
         if ui_server is not None:
             ui_server.close()
         if social_control is not None:
