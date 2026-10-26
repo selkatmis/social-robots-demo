@@ -13,12 +13,27 @@ SMALL_ERROR_MAX = 2  # A first multiplication answer within 2 of the correct val
 MAX_EXPLANATION_TURNS = 5
 MAX_STOP_CONFIRMATION_UNCLEAR = 2
 MAX_OFF_TOPIC_RESPONSES = 3
+MAX_UNRECOGNIZED_NUMBER_ATTEMPTS = 3
+MIN_CHAT_TOPIC_QUESTIONS = 3
+MAX_CHAT_TOPIC_QUESTIONS = 4
+MAX_CHAT_REPLY_CHARACTERS = 500
 AVAILABLE_TOPICS = ("KEREN", "DELEN")
 DIRECT_SUBJECT_SWITCHES = {
     "WISSEL_KEREN": "KEREN",
     "WISSEL_DELEN": "DELEN",
 }
 SUBJECT_CHANGE_INTENTS = {"ANDER_ONDERWERP", *DIRECT_SUBJECT_SWITCHES}
+CHAT_INTENTS = {
+    "CONTINUE",
+    "DIRECT_ANSWER",
+    "TOPIC_CHANGE",
+    "SWITCH_REKENEN",
+    "SWITCH_KEREN",
+    "SWITCH_DELEN",
+    "UNCLEAR",
+    "SENSITIVE",
+    "STOP",
+}
 
 # Match common Dutch spoken-number answers deterministically, without asking
 # the LLM to judge whether an answer is mathematically correct.
@@ -481,6 +496,30 @@ def is_simple_numeric_answer(child_text):
     return text.isdecimal() or text in NUMBER_WORDS
 
 
+def looks_like_numeric_answer_expression(child_text):
+    """Recognize a number in wording that clearly presents it as an answer."""
+    if extract_answer_number(child_text) is None:
+        return False
+    tokens = re.findall(r"\d+|[^\W\d_]+", child_text.casefold(), re.UNICODE)
+    return len(tokens) <= 3 or any(
+        word in {"antwoord", "uitkomst", "volgens", "denk"} for word in tokens
+    )
+
+
+def is_unclear_number_attempt(child_text, response_type):
+    """Separate likely recognition trouble from wrong and off-topic answers."""
+    if response_type in {"ONVERSTAANBAAR_ANTWOORD", "ONBEKEND"}:
+        return True
+    if response_type != "OFF_TOPIC":
+        return False
+
+    words, _ = normalized_words(child_text)
+    has_known_tangent = any(
+        word in template.PLAYFUL_OFF_TOPIC_ACKNOWLEDGEMENTS for word in words
+    )
+    return 0 < len(words) <= 3 and not has_known_tangent
+
+
 def multiplication_fact_key(exercise):
     """Treat reversed multiplication operands as the same underlying fact."""
     return tuple(sorted((exercise["groups"], exercise["group_size"])))
@@ -633,9 +672,277 @@ def validated_classifier_label(result, allowed_labels):
     return label if label in allowed_labels else "ONBEKEND"
 
 
+def _extract_json_object(raw_response):
+    """Parse one strict JSON object, tolerating a single fenced wrapper."""
+    if not isinstance(raw_response, str):
+        return None
+    text = raw_response.strip()
+    if text.startswith("```") and text.endswith("```"):
+        lines = text.splitlines()
+        if len(lines) >= 3:
+            text = "\n".join(lines[1:-1]).strip()
+    try:
+        value = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _clean_spoken_reply(value):
+    if not isinstance(value, str):
+        return None
+    reply = " ".join(value.split()).strip()
+    if not reply or len(reply) > MAX_CHAT_REPLY_CHARACTERS:
+        return None
+    reply = reply.replace("**", "").replace("__", "").replace("`", "")
+    if reply.count("?") > 1:
+        return None
+    return reply.strip() or None
+
+
+def _clean_chat_topic(value):
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return None
+    topic = " ".join(value.split()).strip()
+    return topic if 0 < len(topic) <= 80 else None
+
+
+def _contains_spoken_question(reply):
+    return "?" in reply
+
+
+def _without_spoken_questions(reply):
+    sentences = re.split(r"(?<=[.!?])\s+", reply)
+    statements = [sentence for sentence in sentences if "?" not in sentence]
+    cleaned = " ".join(statements).strip()
+    return cleaned or None
+
+
+def reply_requests_private_information(reply):
+    """Reject generated questions that solicit identifying child data."""
+    normalized = normalized_words(reply)[1]
+    if normalized in {
+        "hoe heet je",
+        "hoe heet jij",
+        "wat is je naam",
+        "wat is jouw naam",
+        "hoe oud ben je",
+    }:
+        return True
+    private_terms = (
+        "wat is je adres",
+        "wat is jouw adres",
+        "waar woon je",
+        "waar kom je vandaan",
+        "in welke plaats woon je",
+        "wat is je postcode",
+        "telefoonnummer",
+        "mobiele nummer",
+        "hoe heet je school",
+        "welke school",
+        "waar staat je school",
+        "gebruikersnaam",
+        "social media",
+        "wachtwoord",
+        "contactgegevens",
+    )
+    return any(term in normalized for term in private_terms)
+
+
+def contains_private_information(child_text):
+    """Avoid retaining obvious contact or exact-location disclosures."""
+    normalized = normalized_words(child_text)[1]
+    private_markers = (
+        "mijn adres",
+        "ik woon op",
+        "ik woon aan",
+        "ik woon in",
+        "mijn postcode",
+        "mijn telefoonnummer",
+        "mijn mobiele nummer",
+        "mijn school heet",
+        "mijn gebruikersnaam",
+        "mijn wachtwoord",
+    )
+    dutch_phone_number = re.search(
+        r"(?<!\d)(?:(?:\+|00)31[ -]?|0)[1-9](?:[ -]?\d){7,9}(?!\d)",
+        child_text,
+    ) is not None
+    email_like = re.search(r"\b\S+@\S+\.\S+\b", child_text) is not None
+    return dutch_phone_number or email_like or any(
+        marker in normalized for marker in private_markers
+    )
+
+
+def is_sensitive_disclosure(child_text):
+    """Conservatively identify disclosures that need a trusted adult."""
+    normalized = normalized_words(child_text)[1]
+    words = set(normalized.split())
+    sensitive_words = {
+        "zelfmoord",
+        "zelfbeschadiging",
+        "drugs",
+        "alcohol",
+        "roken",
+        "mishandeld",
+        "mishandeling",
+        "misbruikt",
+        "misbruik",
+        "seks",
+        "zwanger",
+        "politiek",
+        "religie",
+    }
+    sensitive_phrases = (
+        "wil niet meer leven",
+        "mezelf pijn",
+        "mezelf snijden",
+        "in mezelf snijden",
+        "doet mij pijn",
+        "slaat mij",
+        "bang om naar huis",
+        "niemand mag het weten",
+        "geheim houden",
+        "welke medicijnen",
+        "wat voor behandeling",
+        "problemen thuis",
+        "ruzie thuis",
+        "geldproblemen",
+        "ik ben eenzaam",
+        "ik voel me eenzaam",
+        "ik ben heel verdrietig",
+    )
+    return bool(words & sensitive_words) or any(
+        phrase in normalized for phrase in sensitive_phrases
+    )
+
+
+def contains_unsafe_generated_content(reply):
+    """Fail closed if generated dialogue introduces a restricted subject."""
+    normalized = normalized_words(reply)[1]
+    unsafe_terms = (
+        "seks",
+        "drugs",
+        "alcohol",
+        "roken",
+        "zelfbeschadiging",
+        "zelfmoord",
+        "politiek",
+        "verkiezingen",
+        "religie",
+        "geweld",
+        "mishandeling",
+        "misbruik",
+        "volwassen relatie",
+        "medische diagnose",
+        "medische behandeling",
+        "diagnose stellen",
+        "gezinsinkomen",
+        "problemen thuis",
+    )
+    return any(term in normalized for term in unsafe_terms)
+
+
+def chat_opening_repeats_introduction(reply):
+    """Reject a generated opening that greets or introduces QT again."""
+    words, normalized = normalized_words(reply)
+    starts_with_greeting = bool(words) and contains_loose_word(
+        words[:1],
+        template.WAKE_GREETING_WORDS,
+    )
+    return starts_with_greeting or "ik ben qt" in normalized
+
+
+def _validate_chat_response(raw_response):
+    parsed = _extract_json_object(raw_response)
+    if parsed is None:
+        return None, "invalid_json"
+    required_fields = {"intent", "reply", "topic", "cycle_complete"}
+    if set(parsed) != required_fields:
+        return None, "invalid_fields"
+
+    intent = parsed.get("intent")
+    if not isinstance(intent, str) or intent not in CHAT_INTENTS:
+        return None, "invalid_intent"
+
+    raw_reply = parsed.get("reply")
+    reply = _clean_spoken_reply(raw_reply)
+    if raw_reply is not None and reply is None:
+        return None, "invalid_reply"
+    if intent in {"CONTINUE", "DIRECT_ANSWER", "TOPIC_CHANGE", "UNCLEAR"}:
+        if reply is None:
+            return None, "missing_reply"
+    if reply is not None:
+        if reply_requests_private_information(reply):
+            return None, "private_solicitation"
+        if contains_unsafe_generated_content(reply):
+            return None, "unsafe_generated_content"
+
+    raw_topic = parsed.get("topic")
+    topic = _clean_chat_topic(raw_topic)
+    if raw_topic is not None and topic is None:
+        return None, "invalid_topic"
+    if intent == "TOPIC_CHANGE" and topic is None:
+        return None, "missing_topic"
+    if topic is not None and contains_unsafe_generated_content(topic):
+        return None, "unsafe_topic"
+
+    cycle_complete = parsed.get("cycle_complete", False)
+    if not isinstance(cycle_complete, bool):
+        return None, "invalid_cycle_complete"
+    return {
+        "intent": intent,
+        "reply": reply,
+        "topic": topic,
+        "cycle_complete": cycle_complete,
+    }, None
+
+
+def classify_activity_response(llm, child_text, question=None):
+    """Classify the child's activity choice without guessing from a bare yes."""
+    _, normalized = normalized_words(child_text)
+    if normalized in {"ja", "jaa", "ja hoor", "yes", "oke", "oké", "prima"}:
+        return "ONBEKEND"
+    result = llm.prompt(
+        f"{template.INSTRUCTIONS}\n"
+        f"{template.ACTIVITY_CHOICE_CLASSIFIER}\n"
+        f"Vraag van QT: {(question or template.ACTIVITY_CHOICE_QUESTIONS[0])!r}\n"
+        f"Kind zegt: {child_text!r}",
+        max_tokens=15,
+        temperature=0.0,
+    )
+    return validated_classifier_label(
+        result,
+        {
+            "REKENEN",
+            "KEREN",
+            "DELEN",
+            "KLETSEN",
+            "KLETSEN_ZELFDE",
+            "KIES_JIJ",
+            "STOP",
+            "ONBEKEND",
+        },
+    )
+
+
 def classify_choice_response(llm, child_text, question=None):
     """Classify a topic choice in the context of QT's actual question."""
     active_question = question or template.CHOICE_QUESTIONS[0]
+    _, normalized = normalized_words(child_text)
+    if normalized in {
+        "ja",
+        "jaa",
+        "ja hoor",
+        "yes",
+        "is goed",
+        "prima",
+        "oke",
+        "oké",
+    }:
+        return "ONBEKEND"
     result = llm.prompt(
         f"{template.INSTRUCTIONS}\n"
         f"{template.CHOICE_CLASSIFIER_1}\n"
@@ -705,6 +1012,9 @@ def classify_standby_input(child_text):
         phrase in padded
         for phrase in template.STANDBY_PRACTICE_PHRASES
     )
+    wants_chat = bool(word_set & template.STANDBY_CHAT_ACTIVITY_WORDS) and bool(
+        word_set & template.STANDBY_PRACTICE_INTENT_WORDS
+    )
     asks_about_qt = any(
         phrase in padded
         for phrase in (
@@ -721,6 +1031,8 @@ def classify_standby_input(child_text):
         bool(word_set & template.STANDBY_GOODBYE_WORDS) and len(words) <= 4
     ) or normalized in {"tot ziens", "tot de volgende keer"}
 
+    if wants_chat:
+        return "CHAT"
     if wants_practice:
         return "PRACTICE"
     if asks_about_qt:
@@ -756,9 +1068,97 @@ def _capitalize_name(name_words):
     return " ".join(formatted)
 
 
+def _validated_name_candidate(candidate, child_text):
+    """Validate a proposed name without relying on an accepted-name list."""
+    if not isinstance(candidate, str):
+        return None
+    candidate = candidate.strip().strip(" \t\r\n.,!?;:\"“”")
+    name_words = re.findall(
+        r"[^\W\d_]+(?:[-'][^\W\d_]+)*",
+        candidate,
+        re.UNICODE,
+    )
+    if not 1 <= len(name_words) <= 3 or len(candidate) > 40:
+        return None
+
+    extracted_spoken = normalized_words(candidate)[1]
+    non_name_answers = {
+        "ja",
+        "jaa",
+        "ja hoor",
+        "yes",
+        "nee",
+        "nee hoor",
+        "oke",
+        "oké",
+        "prima",
+        "hallo",
+        "hoi",
+        "rekenen",
+        "kletsen",
+        "stop",
+        "stoppen",
+        "olifant",
+        "tijger",
+    }
+    if not extracted_spoken or extracted_spoken in non_name_answers:
+        return None
+
+    # The candidate must occur in the child's own words, so an LLM can never
+    # invent a plausible-looking name that was not actually supplied.
+    child_spoken = f" {normalized_words(child_text)[1]} "
+    if f" {extracted_spoken} " not in child_spoken:
+        return None
+    return _capitalize_name(name_words)
+
+
+def _contextual_name_candidate(child_text):
+    """Recover clear name-shaped answers in the explicit ASK_NAME context."""
+    text = child_text.strip()
+    explicit_patterns = (
+        r"^ik\s+(?:heet|het)\s+(.+?)\s*[.!?]*$",
+        r"^mijn\s+naam\s+is\s+(.+?)\s*[.!?]*$",
+        r"^(?:je\s+mag\s+me|noem\s+me)\s+(.+?)\s*[.!?]*$",
+    )
+    for pattern in explicit_patterns:
+        match = re.fullmatch(pattern, text, flags=re.IGNORECASE | re.UNICODE)
+        if match:
+            return _validated_name_candidate(match.group(1), child_text)
+
+    # Keyboard input preserves capitalization, making a single title-cased
+    # word a strong contextual signal. Lowercase ASR output still goes through
+    # the LLM classifier and the same validation below.
+    if re.fullmatch(r"[^\W\d_]+(?:[-'][^\W\d_]+)*[.!?]?", text, re.UNICODE):
+        candidate = text.rstrip(".!?")
+        if candidate[:1].isupper():
+            return _validated_name_candidate(candidate, child_text)
+    return None
+
+
 def classify_name_response(llm, child_text, question=None):
     """Interpret a name answer through strict JSON and validate it in Python."""
     active_question = question or template.ASK_NAME_QUESTION
+    _, normalized = normalized_words(child_text)
+    ambiguous_answer = normalized in {
+        "ja",
+        "jaa",
+        "ja hoor",
+        "yes",
+        "oke",
+        "oké",
+        "prima",
+    }
+    refusal = any(
+        phrase in f" {normalized} "
+        for phrase in (
+            " liever niet ",
+            " vertel ik liever niet ",
+            " wil ik niet vertellen ",
+            " dat zeg ik niet ",
+            " geen naam ",
+        )
+    )
+    contextual_candidate = _contextual_name_candidate(child_text)
     result = llm.prompt(
         f"{template.INSTRUCTIONS}\n"
         f"{template.NAME_RESPONSE_CLASSIFIER}\n"
@@ -768,14 +1168,33 @@ def classify_name_response(llm, child_text, question=None):
         max_tokens=45,
         temperature=0.0,
     )
-    if not isinstance(result, str):
+    if refusal:
+        return "REFUSE", None
+    if ambiguous_answer:
         return "UNCLEAR", None
+    if not isinstance(result, str):
+        return (
+            ("NAME", contextual_candidate)
+            if contextual_candidate is not None
+            else ("UNCLEAR", None)
+        )
     try:
         parsed = json.loads(result.strip())
     except (json.JSONDecodeError, TypeError):
-        return "UNCLEAR", None
+        return (
+            ("NAME", contextual_candidate)
+            if contextual_candidate is not None
+            else ("UNCLEAR", None)
+        )
     if not isinstance(parsed, dict):
-        return "UNCLEAR", None
+        return (
+            ("NAME", contextual_candidate)
+            if contextual_candidate is not None
+            else ("UNCLEAR", None)
+        )
+
+    if contextual_candidate is not None:
+        return "NAME", contextual_candidate
 
     intent = parsed.get("intent")
     name = parsed.get("name")
@@ -786,23 +1205,10 @@ def classify_name_response(llm, child_text, question=None):
     if intent != "NAME" or not isinstance(name, str):
         return "UNCLEAR", None
 
-    candidate = name.strip().strip(" \t\r\n.,!?;:\"“”")
-    name_words = re.findall(
-        r"[^\W\d_]+(?:[-'][^\W\d_]+)*",
-        candidate,
-        re.UNICODE,
-    )
-    if not 1 <= len(name_words) <= 3 or len(candidate) > 40:
+    validated_name = _validated_name_candidate(name, child_text)
+    if validated_name is None:
         return "UNCLEAR", None
-
-    # Do not accept a name invented by the model: it must occur in the
-    # child's own response. This validation needs no predefined name list.
-    child_spoken = f" {normalized_words(child_text)[1]} "
-    extracted_spoken = normalized_words(candidate)[1]
-    if not extracted_spoken or f" {extracted_spoken} " not in child_spoken:
-        return "UNCLEAR", None
-
-    return "NAME", _capitalize_name(name_words)
+    return "NAME", validated_name
 
 
 def classify_stop_request(child_text):
@@ -817,8 +1223,12 @@ def classify_stop_request(child_text):
         for phrase in (
             " wil niet meer ",
             " geen zin meer ",
-            " naar huis ",
+            " genoeg geweest ",
+            " wil naar huis ",
+            " moet naar huis ",
             " ben klaar ",
+            " ik ga weer ",
+            " ik ga weg ",
             " wil mijn mama ",
             " wil mama ",
             " wil mijn papa ",
@@ -902,7 +1312,8 @@ def playful_off_topic_acknowledgement(state, child_text):
     )
 
 
-def return_to_choice(state):
+def clear_math_activity(state):
+    """Clear only the current mathematics work, retaining visitor context."""
     state["topic"] = None
     state["exercise"] = None
     state.pop("explanation_solved", None)
@@ -913,6 +1324,10 @@ def return_to_choice(state):
     state.pop("question_progress", None)
     state.pop("multiplication_explanation_progress", None)
     state.pop("stop_confirmation", None)
+
+
+def return_to_choice(state):
+    clear_math_activity(state)
     state["phase"] = "CHOICE"
 
 
@@ -937,6 +1352,21 @@ def return_to_standby(state):
         "ask_name_unclear_count",
         "neutral_choice_question",
         "name_used_in_practice_session",
+        "activity",
+        "pending_activity",
+        "pending_math_topic",
+        "name_phase_complete",
+        "introduction_given",
+        "activity_choice_context",
+        "active_activity_question",
+        "chat_history",
+        "current_chat_topic",
+        "last_chat_topic_category",
+        "used_chat_topics",
+        "chat_question_count",
+        "chat_pending_clarification",
+        "chat_opening_request",
+        "continue_same_chat_topic",
     )
     for key in active_keys:
         state.pop(key, None)
@@ -974,14 +1404,26 @@ def classify_child_response(llm, question, child_text, current_topic=None):
                 "HERHAAL",
                 "WISSEL_KEREN",
                 "WISSEL_DELEN",
+                "WISSEL_KLETSEN",
+                "SLA_OVER",
                 "ANDER_ONDERWERP",
+                "ONVERSTAANBAAR_ANTWOORD",
                 "OFF_TOPIC",
                 "STOP",
                 "ONBEKEND",
             },
         )
-        # Keep genuine non-answer intents; only recover a missed numeric answer.
-        if response_type == "ONBEKEND" and extract_answer_number(child_text) is not None:
+        # Keep genuine non-answer intents. Recover a deterministic number when
+        # the label is uncertain, or when the wording clearly presents that
+        # number as an answer despite an OFF_TOPIC misclassification.
+        has_number = extract_answer_number(child_text) is not None
+        if has_number and (
+            response_type in {"ONBEKEND", "ONVERSTAANBAAR_ANTWOORD"}
+            or (
+                response_type == "OFF_TOPIC"
+                and looks_like_numeric_answer_expression(child_text)
+            )
+        ):
             response_type = "ANTWOORD"
 
     return response_type
@@ -1061,8 +1503,16 @@ def make_initial_state():
         "phase": "STANDBY",
         "outer_conversation": True,
         "child_name": None,
+        "name_phase_complete": False,
+        "activity": None,
+        "pending_activity": None,
+        "pending_math_topic": None,
         "topic": None,
         "exercise": None,
+        "chat_history": [],
+        "current_chat_topic": None,
+        "chat_question_count": 0,
+        "used_chat_topics": [],
         "remaining_multiplication_indices": [],
         "last_multiplication_index": None,
         "last_multiplication_fact_key": None,
@@ -1091,11 +1541,10 @@ class TutorTurn:
 
 
 class TutorEngine:
-    """Stateful, interface-independent Dutch mathematics tutor.
+    """Stateful, interface-independent QT activity engine.
 
-    The engine owns every lesson decision.  It consumes one child transcript
-    at a time and returns ordinary Python data; it never performs terminal,
-    microphone, or robot I/O.
+    The engine owns activity transitions, mathematics decisions, and child-safe
+    chat cycles. It never performs terminal, microphone, or robot I/O.
     """
 
     def __init__(self, llm, *, state=None):
@@ -1147,6 +1596,8 @@ class TutorEngine:
 
         if phase == "STANDBY":
             self._handle_standby(child_text, utterances, diagnostics)
+        elif phase == "ACTIVITY_CHOICE":
+            self._handle_activity_choice(child_text, utterances, diagnostics)
         elif phase == "INVITATION":
             self._handle_invitation(child_text, utterances, diagnostics)
         elif phase == "ASK_NAME":
@@ -1175,12 +1626,407 @@ class TutorEngine:
             )
         elif phase == "AFTER_PRACTICE":
             self._handle_after_practice(child_text, utterances, diagnostics)
+        elif phase == "KLETSEN":
+            self._handle_chat(child_text, utterances, diagnostics)
         else:
             raise RuntimeError(f"Unknown conversation phase: {phase}")
 
         if follow_transitions:
             self._settle(utterances)
         return self._turn(utterances, diagnostics)
+
+    def _enter_activity_choice(self, utterances):
+        state = self._state
+        if not state.get("introduction_given"):
+            introduction = choose_nonrepeating_response(
+                state,
+                "last_introduction_variant",
+                template.INTRODUCTION_VARIANTS,
+            )
+            utterances.extend(introduction)
+            state["introduction_given"] = True
+            state["active_activity_question"] = introduction[-1]
+            if state.get("pending_activity"):
+                if state.get("name_phase_complete"):
+                    self._start_selected_activity(utterances)
+                else:
+                    self._set_phase("ASK_NAME")
+            return
+
+        context = state.pop("activity_choice_context", None)
+        questions = (
+            template.CHAT_CYCLE_CHOICE_QUESTIONS
+            if context == "CHAT_END"
+            else template.ACTIVITY_CHOICE_QUESTIONS
+        )
+        question = choose_nonrepeating_response(
+            state,
+            "last_activity_choice_question",
+            questions,
+        )
+        state["active_activity_question"] = question
+        utterances.append(question)
+
+    def _handle_activity_choice(self, child_text, utterances, diagnostics):
+        active_question = self._state.get(
+            "active_activity_question",
+            template.ACTIVITY_CHOICE_QUESTIONS[0],
+        )
+        if self._intercept_stop_request(
+            child_text,
+            utterances,
+            diagnostics,
+            resume_phase="ACTIVITY_CHOICE",
+            resume_utterances=(active_question,),
+        ):
+            return
+
+        choice = classify_activity_response(
+            self.llm,
+            child_text,
+            question=active_question,
+        )
+        diagnostics.append(f"[ACTIVITY] {choice}")
+        if choice == "STOP":
+            self._finish_stop(utterances)
+            return
+        if choice == "KIES_JIJ":
+            choice = random.choice(("REKENEN", "KLETSEN"))
+        if choice == "ONBEKEND":
+            utterances.append(template.ACTIVITY_CHOICE_CLARIFICATION)
+            self._state["active_activity_question"] = (
+                template.ACTIVITY_CHOICE_CLARIFICATION
+            )
+            return
+
+        self._queue_activity_choice(choice, child_text, utterances)
+
+    def _queue_activity_choice(self, choice, child_text, utterances):
+        state = self._state
+        state.pop("active_activity_question", None)
+        if choice in {"REKENEN", "KEREN", "DELEN"}:
+            state["pending_activity"] = "REKENEN"
+            state["pending_math_topic"] = (
+                choice if choice in AVAILABLE_TOPICS else None
+            )
+        else:
+            state["pending_activity"] = "KLETSEN"
+            state["continue_same_chat_topic"] = choice == "KLETSEN_ZELFDE"
+            state["chat_opening_request"] = child_text
+
+        if not state.get("name_phase_complete"):
+            self._set_phase("ASK_NAME")
+            return
+        self._start_selected_activity(utterances)
+
+    def _start_selected_activity(self, utterances, *, announce=True):
+        state = self._state
+        activity = state.pop("pending_activity", None) or "REKENEN"
+        if activity == "KLETSEN":
+            self._start_chat_activity(utterances, announce=announce)
+            return
+
+        state["activity"] = "REKENEN"
+        state.pop("continue_same_chat_topic", None)
+        state.pop("chat_opening_request", None)
+        math_topic = state.pop("pending_math_topic", None)
+        if math_topic in AVAILABLE_TOPICS:
+            self._start_topic_session(math_topic, utterances)
+            return
+
+        clear_math_activity(state)
+        if announce:
+            utterances.append(template.MATH_ACTIVITY_START)
+        state["neutral_choice_question"] = True
+        self._set_phase("CHOICE")
+
+    def _start_chat_activity(self, utterances, *, announce=True):
+        state = self._state
+        clear_math_activity(state)
+        state["activity"] = "KLETSEN"
+        state.pop("pending_activity", None)
+        state.pop("pending_math_topic", None)
+        if announce:
+            utterances.append(template.CHAT_ACTIVITY_START)
+        self._set_phase("KLETSEN")
+
+    def _enter_chat(self, utterances):
+        state = self._state
+        same_topic = state.pop("continue_same_chat_topic", False)
+        opening_request = state.get("chat_opening_request")
+        if opening_request and contains_private_information(opening_request):
+            utterances.append(template.CHAT_PRIVATE_INFORMATION_RESPONSE)
+            state.pop("chat_opening_request", None)
+        elif opening_request and is_sensitive_disclosure(opening_request):
+            utterances.append(template.CHAT_SENSITIVE_RESPONSE)
+            state.pop("chat_opening_request", None)
+        current_topic = state.get("current_chat_topic")
+        if same_topic and current_topic is not None:
+            # This is a fresh 3-4 question cycle about a different aspect of
+            # the same subject, not a continuation of the exhausted budget.
+            self._start_chat_topic(current_topic)
+        else:
+            topic = self._choose_new_chat_topic()
+            self._start_chat_topic(topic)
+        generated_opening = self._generate_chat_opening(same_topic=same_topic)
+        if generated_opening is None:
+            topic = state["current_chat_topic"]
+            opening = template.CHAT_TOPIC_OPENING_FALLBACKS.get(
+                topic,
+                "Waar wil jij graag over kletsen?",
+            )
+        else:
+            opening, actual_topic = generated_opening
+            if actual_topic != state.get("current_chat_topic"):
+                self._start_chat_topic(actual_topic)
+        utterances.append(opening)
+        self._append_chat_history("qt", opening)
+        if _contains_spoken_question(opening):
+            state["chat_question_count"] = state.get("chat_question_count", 0) + 1
+
+    def _choose_new_chat_topic(self):
+        state = self._state
+        current = (state.get("current_chat_topic") or "").casefold()
+        previous = (state.get("last_chat_topic_category") or "").casefold()
+        used = {
+            topic.casefold() for topic in state.get("used_chat_topics", [])
+        }
+        available = [
+            topic
+            for topic in template.CHAT_TOPIC_CATEGORIES
+            if topic.casefold() not in {current, previous}
+            and topic.casefold() not in used
+        ]
+        if not available:
+            available = [
+                topic
+                for topic in template.CHAT_TOPIC_CATEGORIES
+                if topic.casefold() not in {current, previous}
+            ]
+        return random.choice(available or template.CHAT_TOPIC_CATEGORIES)
+
+    def _start_chat_topic(self, topic):
+        state = self._state
+        state["current_chat_topic"] = topic
+        state["chat_question_count"] = 0
+        state.pop("chat_pending_clarification", None)
+        if topic in template.CHAT_TOPIC_CATEGORIES:
+            state["last_chat_topic_category"] = topic
+            used = state.setdefault("used_chat_topics", [])
+            if topic not in used:
+                used.append(topic)
+
+    def _generate_chat_opening(self, *, same_topic=False):
+        state = self._state
+        topic = state.get("current_chat_topic")
+        request = state.pop("chat_opening_request", None) or "(geen specifieke wens)"
+        prompt = (
+            f"{template.INSTRUCTIONS}\n"
+            f"{template.CHAT_TOPIC_OPENING_INSTRUCTIONS}\n\n"
+            f"GEKOZEN ONDERWERP: {topic}\n"
+            f"WENS VAN HET KIND BIJ DE ACTIVITEITSKEUZE: {request}\n"
+            f"NIEUWE CYCLUS OVER HETZELFDE ONDERWERP: "
+            f"{'ja; kies een ander aspect' if same_topic else 'nee'}\n\n"
+            f"GESPREK TOT NU TOE:\n{self._chat_history_for_prompt()}"
+        )
+        try:
+            result = self.llm.prompt(
+                prompt,
+                max_tokens=100,
+                temperature=0.55,
+            )
+        except Exception:
+            return None
+        parsed = _extract_json_object(result)
+        reply = _clean_spoken_reply(parsed.get("reply")) if parsed else None
+        actual_topic = _clean_chat_topic(parsed.get("topic")) if parsed else None
+        actual_topic = actual_topic or topic
+        if (
+            reply is None
+            or not _contains_spoken_question(reply)
+            or reply_requests_private_information(reply)
+            or contains_unsafe_generated_content(reply)
+            or chat_opening_repeats_introduction(reply)
+            or actual_topic is None
+            or contains_unsafe_generated_content(actual_topic)
+        ):
+            return None
+        return reply, actual_topic
+
+    def _handle_chat(self, child_text, utterances, diagnostics):
+        """Handle one safe, bounded conversational turn."""
+        state = self._state
+
+        if not child_text:
+            diagnostics.append("[CHAT] UNCLEAR_EMPTY")
+            utterances.append(template.CHAT_CLARIFICATION)
+            return
+
+        # Do not put private or sensitive disclosures in the short history or
+        # send them to the model. Safety takes priority over the legacy stop
+        # phrase matcher: for example, "ik wil niet meer leven" must never
+        # receive a routine goodbye. A literal stop request is still honored
+        # immediately after the fixed, non-intrusive safety response.
+        if contains_private_information(child_text):
+            diagnostics.append("[CHAT] PRIVATE_INFORMATION")
+            utterances.append(template.CHAT_PRIVATE_INFORMATION_RESPONSE)
+            return
+        if is_sensitive_disclosure(child_text):
+            diagnostics.append("[CHAT] SENSITIVE")
+            utterances.append(template.CHAT_SENSITIVE_RESPONSE)
+            words, _ = normalized_words(child_text)
+            if set(words) & template.STOP_CONFIRMATION_STOP_WORDS:
+                self._finish_stop(utterances)
+            return
+
+        # A clear request to end the interaction always wins over every
+        # activity or topic transition proposed by the language model.
+        if classify_stop_request(child_text) == "EXPLICIT":
+            diagnostics.append("[CHAT] STOP")
+            self._finish_stop(utterances)
+            return
+
+        response, validation_error = self._generate_chat_response(child_text)
+        if response is None:
+            diagnostics.append(f"[CHAT] FALLBACK:{validation_error}")
+            utterances.append(template.CHAT_RESPONSE_FALLBACK)
+            self._finish_chat_topic()
+            return
+
+        intent = response["intent"]
+        diagnostics.append(f"[CHAT] {intent}")
+        if intent == "STOP":
+            self._finish_stop(utterances)
+            return
+        if intent in {"SWITCH_REKENEN", "SWITCH_KEREN", "SWITCH_DELEN"}:
+            self._switch_chat_to_math(intent, utterances)
+            return
+        if intent == "SENSITIVE":
+            utterances.append(template.CHAT_SENSITIVE_RESPONSE)
+            return
+        if intent == "UNCLEAR":
+            utterances.append(response["reply"] or template.CHAT_CLARIFICATION)
+            return
+
+        self._append_chat_history("child", child_text)
+        if intent == "TOPIC_CHANGE":
+            self._start_chat_topic(response["topic"])
+
+        reply = response["reply"]
+        question_count_before = state.get("chat_question_count", 0)
+        is_proactive_question = (
+            intent in {"CONTINUE", "TOPIC_CHANGE"}
+            and reply is not None
+            and _contains_spoken_question(reply)
+        )
+
+        # Once four proactive questions have been answered, Python removes any
+        # extra model-generated question and turns this into a natural closing
+        # statement. Direct answers and clarifications never consume budget.
+        if (
+            is_proactive_question
+            and question_count_before >= MAX_CHAT_TOPIC_QUESTIONS
+        ):
+            reply = _without_spoken_questions(reply)
+            is_proactive_question = False
+            response["cycle_complete"] = True
+        if reply is None:
+            reply = template.CHAT_CYCLE_CLOSING_FALLBACK
+
+        utterances.append(reply)
+        self._append_chat_history("qt", reply)
+        if is_proactive_question:
+            state["chat_question_count"] = question_count_before + 1
+
+        question_count = state.get("chat_question_count", 0)
+        natural_rest = (
+            intent == "CONTINUE"
+            and question_count >= MIN_CHAT_TOPIC_QUESTIONS
+            and not _contains_spoken_question(reply)
+        )
+        if not _contains_spoken_question(reply) and (
+            question_count >= MAX_CHAT_TOPIC_QUESTIONS
+            or (response["cycle_complete"] and question_count >= MIN_CHAT_TOPIC_QUESTIONS)
+            or natural_rest
+        ):
+            self._finish_chat_topic()
+
+    def _generate_chat_response(self, child_text):
+        """Generate and validate one JSON chat action, retrying format once."""
+        state = self._state
+        question_count = state.get("chat_question_count", 0)
+        budget_note = (
+            "Er zijn al vier proactieve vragen gesteld. Stel nu geen nieuwe vraag."
+            if question_count >= MAX_CHAT_TOPIC_QUESTIONS
+            else (
+                f"Er zijn {question_count} van maximaal "
+                f"{MAX_CHAT_TOPIC_QUESTIONS} proactieve vragen gesteld."
+            )
+        )
+        base_prompt = (
+            f"{template.INSTRUCTIONS}\n"
+            f"{template.CHAT_RESPONSE_INSTRUCTIONS}\n\n"
+            f"HUIDIG ONDERWERP: {state.get('current_chat_topic')}\n"
+            f"VRAGEN IN DEZE CYCLUS: {question_count}\n"
+            f"BUDGETREGEL: {budget_note}\n\n"
+            f"GESPREK TOT NU TOE:\n{self._chat_history_for_prompt()}\n\n"
+            f"KIND ZEGT NU: {child_text!r}"
+        )
+        last_error = "generation_error"
+        for attempt in range(2):
+            prompt = base_prompt
+            if attempt:
+                prompt = f"{base_prompt}\n\n{template.CHAT_FORMAT_RETRY}"
+            try:
+                raw_response = self.llm.prompt(
+                    prompt,
+                    max_tokens=180,
+                    temperature=0.45 if attempt == 0 else 0.1,
+                )
+            except Exception:
+                last_error = "generation_error"
+                continue
+            response, last_error = _validate_chat_response(raw_response)
+            if response is not None:
+                return response, None
+        return None, last_error
+
+    def _append_chat_history(self, role, text):
+        """Keep a small in-memory window for this visitor only."""
+        if role not in {"child", "qt"} or not isinstance(text, str):
+            return
+        cleaned = " ".join(text.split()).strip()
+        if not cleaned:
+            return
+        history = self._state.setdefault("chat_history", [])
+        history.append({"role": role, "text": cleaned[:300]})
+        del history[:-10]
+
+    def _chat_history_for_prompt(self):
+        history = self._state.get("chat_history", [])[-10:]
+        if not history:
+            return "(nog geen eerdere gespreksbeurten)"
+        labels = {"child": "Kind", "qt": "QT"}
+        return "\n".join(
+            f"{labels.get(item.get('role'), 'QT')}: {item.get('text', '')}"
+            for item in history
+        )
+
+    def _finish_chat_topic(self):
+        self._state["activity_choice_context"] = "CHAT_END"
+        self._set_phase("ACTIVITY_CHOICE")
+
+    def _switch_chat_to_math(self, intent, utterances):
+        utterances.append(template.CHAT_TO_MATH_RESPONSE)
+        self._state["activity"] = "REKENEN"
+        if intent == "SWITCH_KEREN":
+            self._start_topic_session("KEREN", utterances, announce=False)
+        elif intent == "SWITCH_DELEN":
+            self._start_topic_session("DELEN", utterances, announce=False)
+        else:
+            clear_math_activity(self._state)
+            self._state["neutral_choice_question"] = True
+            self._set_phase("CHOICE")
 
     def _turn(self, utterances, diagnostics=()):
         return TutorTurn(
@@ -1207,7 +2053,9 @@ class TutorEngine:
             # STANDBY deliberately produces no speech.  The adapters will
             # immediately listen for a greeting and keep the process alive.
             return
-        if phase == "INVITATION":
+        if phase == "ACTIVITY_CHOICE":
+            self._enter_activity_choice(utterances)
+        elif phase == "INVITATION":
             greeting = choose_nonrepeating_response(
                 self._state,
                 "last_invitation_greeting",
@@ -1216,10 +2064,17 @@ class TutorEngine:
             self._state["active_invitation_greeting"] = greeting
             utterances.append(greeting)
         elif phase == "ASK_NAME":
+            pending_activity = self._state.get("pending_activity")
+            if pending_activity == "KLETSEN":
+                question_pool = template.ASK_NAME_CHAT_QUESTIONS
+            elif pending_activity == "REKENEN":
+                question_pool = template.ASK_NAME_MATH_QUESTIONS
+            else:
+                question_pool = template.ASK_NAME_QUESTIONS
             question = choose_nonrepeating_response(
                 self._state,
                 "last_ask_name_question",
-                template.ASK_NAME_QUESTIONS,
+                question_pool,
             )
             self._state["active_ask_name_question"] = question
             utterances.append(question)
@@ -1249,6 +2104,8 @@ class TutorEngine:
             utterances.append(confirmation["question"])
         elif phase == "AFTER_PRACTICE":
             utterances.append(template.AFTER_PRACTICE_QUESTION)
+        elif phase == "KLETSEN":
+            self._enter_chat(utterances)
         else:
             raise RuntimeError(f"Unknown conversation phase: {phase}")
 
@@ -1256,11 +2113,12 @@ class TutorEngine:
         if self._state.get("child_name"):
             utterances.append(self._make_named_farewell())
         else:
-            responses = (
-                template.STOP_UNCLEAR_FALLBACK_RESPONSES
-                if fallback
-                else template.STOP_FAREWELL_RESPONSES
-            )
+            if fallback:
+                responses = template.STOP_UNCLEAR_FALLBACK_RESPONSES
+            elif self._state.get("activity") == "KLETSEN":
+                responses = template.CHAT_FAREWELL_RESPONSES
+            else:
+                responses = template.STOP_FAREWELL_RESPONSES
             utterances.append(
                 choose_nonrepeating_response(
                     self._state,
@@ -1274,10 +2132,15 @@ class TutorEngine:
 
     def _make_named_farewell(self):
         """Build the farewell before STANDBY clears the visitor's name."""
+        prefixes = (
+            template.PERSONALIZED_CHAT_FAREWELL_PREFIXES
+            if self._state.get("activity") == "KLETSEN"
+            else template.PERSONALIZED_FAREWELL_PREFIXES
+        )
         prefix = choose_nonrepeating_response(
             self._state,
             "last_named_farewell_prefix",
-            template.PERSONALIZED_FAREWELL_PREFIXES,
+            prefixes,
         )
         ending = choose_nonrepeating_response(
             self._state,
@@ -1309,17 +2172,26 @@ class TutorEngine:
         diagnostic_name = {
             "GREETING": "Greeting",
             "PRACTICE": "Practice request",
+            "CHAT": "Chat request",
             "ABOUT": "Question",
             "GOODBYE": "Goodbye",
         }[standby_intent]
         diagnostics.append(f"[STANDBY] {diagnostic_name} recognized")
 
         if standby_intent == "PRACTICE":
-            self._set_phase("ASK_NAME")
+            self._state["pending_activity"] = "REKENEN"
+            words, _ = normalized_words(child_text)
+            if any(word in {"keren", "tafels", "keersommen"} for word in words):
+                self._state["pending_math_topic"] = "KEREN"
+            elif any(word in {"delen", "verdelen", "deelsommen"} for word in words):
+                self._state["pending_math_topic"] = "DELEN"
+            self._set_phase("ACTIVITY_CHOICE")
+        elif standby_intent == "CHAT":
+            self._state["pending_activity"] = "KLETSEN"
+            self._state["chat_opening_request"] = child_text
+            self._set_phase("ACTIVITY_CHOICE")
         elif standby_intent == "ABOUT":
-            utterances.append(template.STANDBY_ABOUT_RESPONSE)
-            self._state["phase"] = "INVITATION"
-            self._entry_pending = False
+            self._set_phase("ACTIVITY_CHOICE")
         elif standby_intent == "GOODBYE":
             utterances.append(
                 choose_nonrepeating_response(
@@ -1329,7 +2201,7 @@ class TutorEngine:
                 )
             )
         else:
-            self._set_phase("INVITATION")
+            self._set_phase("ACTIVITY_CHOICE")
 
     def _handle_invitation(self, child_text, utterances, diagnostics):
         """Ask for agreement before entering the mathematics tutor."""
@@ -1410,8 +2282,10 @@ class TutorEngine:
                 template.NAME_ACKNOWLEDGEMENT_RESPONSES,
             )
             utterances.append(acknowledgement.format(name=child_name))
-            self._state["neutral_choice_question"] = True
-            self._set_phase("CHOICE")
+            self._state["name_phase_complete"] = True
+            # The contextual name question already introduced the selected
+            # activity. Suppress a second "Dan gaan we..." announcement.
+            self._start_selected_activity(utterances, announce=False)
             return
 
         if decision == "REFUSE":
@@ -1426,15 +2300,22 @@ class TutorEngine:
         self._continue_without_name(utterances)
 
     def _continue_without_name(self, utterances):
+        pending_activity = self._state.get("pending_activity")
         self._state["child_name"] = None
+        self._state["name_phase_complete"] = True
         self._state.pop("ask_name_unclear_count", None)
         self._state.pop("active_ask_name_question", None)
-        utterances.append(template.ASK_NAME_WITHOUT_NAME)
-        self._state["neutral_choice_question"] = True
-        self._set_phase("CHOICE")
+        if pending_activity == "KLETSEN":
+            transition = template.ASK_NAME_WITHOUT_NAME_CHAT
+        elif pending_activity == "REKENEN":
+            transition = template.ASK_NAME_WITHOUT_NAME_MATH
+        else:
+            transition = template.ASK_NAME_WITHOUT_NAME
+        utterances.append(transition)
+        self._start_selected_activity(utterances, announce=False)
 
     def _handle_after_practice(self, child_text, utterances, diagnostics):
-        """Offer a fresh two-question session or finish this interaction."""
+        """Offer mathematics, chatting, or a graceful end at a round boundary."""
         active_question = (
             template.AFTER_PRACTICE_CLARIFICATION
             if self._state.get("after_practice_unclear")
@@ -1449,18 +2330,19 @@ class TutorEngine:
         ):
             return
 
-        decision = classify_confirmation_response(
+        decision = classify_activity_response(
             self.llm,
-            phase="AFTER_PRACTICE",
             question=active_question,
             child_text=child_text,
         )
-        diagnostics.append(f"[CLASSIFIER] {decision}")
-        if decision == "YES":
+        diagnostics.append(f"[ACTIVITY] {decision}")
+        if decision == "KIES_JIJ":
+            decision = random.choice(("REKENEN", "KLETSEN"))
+        if decision in {"REKENEN", "KEREN", "DELEN", "KLETSEN", "KLETSEN_ZELFDE"}:
             self._state.pop("after_practice_unclear", None)
-            self._set_phase("CHOICE")
+            self._queue_activity_choice(decision, child_text, utterances)
             return
-        if decision == "NO":
+        if decision == "STOP":
             self._finish_after_practice(utterances)
             return
 
@@ -1617,10 +2499,20 @@ class TutorEngine:
 
         self._start_topic_session(choice, utterances)
 
-    def _start_topic_session(self, topic, utterances, *, switched=False):
+    def _start_topic_session(
+        self,
+        topic,
+        utterances,
+        *,
+        switched=False,
+        announce=True,
+    ):
         """Start a fresh adaptive two-question session for one known topic."""
         state = self._state
         return_to_choice(state)
+        state["activity"] = "REKENEN"
+        state.pop("pending_activity", None)
+        state.pop("pending_math_topic", None)
         state.pop("active_choice_question", None)
         state["topic"] = topic
         state["name_used_in_practice_session"] = False
@@ -1638,7 +2530,8 @@ class TutorEngine:
             if switched
             else template.TOPIC_START_RESPONSE
         )
-        utterances.append(response.format(topic=topic.lower()))
+        if announce:
+            utterances.append(response.format(topic=topic.lower()))
         self._set_phase("QUESTION_1")
 
     def _handle_subject_change(self, response_type, utterances):
@@ -1653,7 +2546,12 @@ class TutorEngine:
             return
 
         utterances.append(template.GENERIC_SUBJECT_CHANGE_RESPONSE)
-        return_to_choice(self._state)
+        if self._state.get("outer_conversation"):
+            clear_math_activity(self._state)
+            self._state["activity_choice_context"] = "SWITCH"
+            self._set_phase("ACTIVITY_CHOICE")
+        else:
+            return_to_choice(self._state)
         self._entry_pending = True
 
     def _enter_question(self, utterances):
@@ -1674,11 +2572,37 @@ class TutorEngine:
                 "wrong_or_unclear": 0,
                 "wrong_answers": 0,
                 "off_topic_count": 0,
+                "unrecognized_answers": 0,
                 "first_error_large": False,
                 "turns": 0,
             }
             self._state["question_progress"] = progress
         utterances.append(exercise["question"])
+
+    def _handle_chat_request_during_math(self, utterances, active_question):
+        """Remember one request; a repeated request switches immediately."""
+        state = self._state
+        if state.get("pending_activity") == "KLETSEN":
+            utterances.append(template.MATH_CHAT_SWITCH_SKIP)
+            self._start_chat_activity(utterances, announce=False)
+            return
+        state["pending_activity"] = "KLETSEN"
+        utterances.append(
+            template.MATH_CHAT_SWITCH_PENDING.format(question=active_question)
+        )
+
+    def _skip_current_math_exercise(self, utterances):
+        state = self._state
+        if state.get("pending_activity") == "KLETSEN":
+            utterances.append(template.MATH_CHAT_SWITCH_SKIP)
+            self._start_chat_activity(utterances, announce=False)
+            return
+        clear_math_activity(state)
+        state["activity"] = None
+        state["phase"] = "ACTIVITY_CHOICE"
+        state["active_activity_question"] = template.MATH_SKIP_TO_ACTIVITY
+        self._entry_pending = False
+        utterances.append(template.MATH_SKIP_TO_ACTIVITY)
 
     def _handle_question(self, child_text, utterances, diagnostics):
         state = self._state
@@ -1720,8 +2644,18 @@ class TutorEngine:
         if response_type == "STOP":
             self._finish_stop(utterances)
             return
+        if response_type == "WISSEL_KLETSEN":
+            self._handle_chat_request_during_math(utterances, question)
+            return
+        if response_type == "SLA_OVER":
+            self._skip_current_math_exercise(utterances)
+            return
         if response_type in SUBJECT_CHANGE_INTENTS:
             self._handle_subject_change(response_type, utterances)
+            return
+        if is_unclear_number_attempt(child_text, response_type):
+            diagnostics.append("[ASR] Unclear numerical answer")
+            self._handle_unrecognized_number_answer(utterances)
             return
         if response_type not in {
             "HERHAAL",
@@ -1781,6 +2715,28 @@ class TutorEngine:
             else:
                 go_to_division_explanation(state, solved=False)
             self._entry_pending = True
+
+    def _handle_unrecognized_number_answer(self, utterances):
+        """Repair a likely transcript failure without judging the arithmetic."""
+        state = self._state
+        progress = state["question_progress"]
+        attempts = progress.get("unrecognized_answers", 0) + 1
+        progress["unrecognized_answers"] = attempts
+
+        if attempts == 1:
+            utterances.append(template.NUMBER_ANSWER_CLARIFICATION)
+            return
+        if attempts < MAX_UNRECOGNIZED_NUMBER_ATTEMPTS:
+            utterances.append(template.NUMBER_ANSWER_RETRY)
+            return
+
+        utterances.append(template.NUMBER_ANSWER_SUPPORT)
+        state.pop("question_progress", None)
+        if state["topic"] == "KEREN":
+            go_to_keren_explanation(state, solved=False)
+        else:
+            go_to_division_explanation(state, solved=False)
+        self._entry_pending = True
 
     def _handle_off_topic_question(self, child_text, utterances):
         """Redirect playfully, add support, then enter guided teaching."""
@@ -2014,6 +2970,12 @@ class TutorEngine:
         if response_type == "STOP":
             self._finish_stop(utterances)
             return
+        if response_type == "WISSEL_KLETSEN":
+            self._handle_chat_request_during_math(utterances, resume_utterance)
+            return
+        if response_type == "SLA_OVER":
+            self._skip_current_math_exercise(utterances)
+            return
         if response_type in SUBJECT_CHANGE_INTENTS:
             self._handle_subject_change(response_type, utterances)
             return
@@ -2222,6 +3184,12 @@ class TutorEngine:
         if response_type == "STOP":
             self._finish_stop(utterances)
             return
+        if response_type == "WISSEL_KLETSEN":
+            self._handle_chat_request_during_math(utterances, step["question"])
+            return
+        if response_type == "SLA_OVER":
+            self._skip_current_math_exercise(utterances)
+            return
         if response_type in SUBJECT_CHANGE_INTENTS:
             self._handle_subject_change(response_type, utterances)
             return
@@ -2316,6 +3284,15 @@ class TutorEngine:
         qualifies_for_harder=False,
     ):
         state = self._state
+        if (
+            state.get("outer_conversation")
+            and state.get("pending_activity") == "KLETSEN"
+        ):
+            state.pop("pending_activity", None)
+            utterances.append(template.MATH_CHAT_SWITCH_COMPLETE)
+            self._start_chat_activity(utterances, announce=False)
+            return
+
         if (
             state.get("topic") == "KEREN"
             and state.get("multiplication_question_number", 1) == 1

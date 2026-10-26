@@ -6,10 +6,13 @@ head tracking always remain active. Demo mode only changes what QT does while
 no face is visible.
 """
 
+import json
 import math
 import random
 import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
 
 import cv2
 import rospy
@@ -36,10 +39,19 @@ HEAD_PITCH_JOINT_NAME = "HeadPitch"
 # Runtime demo-state integration. A future UI may either call the SetBool
 # service or publish std_msgs/Bool to the command topic. The latched state topic
 # reports the current value. Tracking never stops when this value changes.
+STAND_BUILD_VERSION = "demo-face-grace-12s-v1"
 INITIAL_DEMO_ACTIVE = False
 DEMO_SET_SERVICE = "/qt_stand/set_demo_active"
 DEMO_COMMAND_TOPIC = "/qt_stand/demo_active/set"
 DEMO_STATE_TOPIC = "/qt_stand/demo_active"
+
+# Minimal Windows-to-QTPC control bridge. This is deliberately separate from
+# the RoboBOND proxy on port 7342: it controls only standby/demo state and does
+# not carry robot commands, camera frames, or conversation data.
+CONTROL_HTTP_BIND_HOST = "0.0.0.0"
+CONTROL_HTTP_PORT = 7343
+CONTROL_HTTP_MAX_BODY_BYTES = 1024
+CONTROL_HTTP_THREAD_NAME = "qt-stand-control"
 
 # Main-loop and startup timing.
 MAIN_LOOP_HZ = 20.0
@@ -116,6 +128,10 @@ HAAR_MIN_FACE_SIZE_PIXELS = (20, 20)
 # Tracking and target-lock tuning. EMA alpha is the weight of the newest
 # detection: smaller values smooth more strongly.
 FACE_LOST_GRACE_SECONDS = 2.0
+# While a conversation is active, keep the last face pose for ten additional
+# seconds. Detection continues throughout this period. A reacquired face
+# resumes tracking immediately; only the full timeout returns the head home.
+DEMO_FACE_LOST_EXTRA_GRACE_SECONDS = 10.0
 FACE_MATCH_MAX_DISTANCE = 0.22
 FACE_SWITCH_AREA_RATIO = 1.8
 FACE_POSITION_EMA_ALPHA = 0.20
@@ -140,6 +156,98 @@ def image_error_to_angle(error, field_of_view_degrees):
     return math.degrees(
         math.atan(2.0 * error * math.tan(half_fov_radians))
     )
+
+
+class StandControlHTTPServer(ThreadingHTTPServer):
+    """Small HTTP server exposing only health and the demo-state boolean."""
+
+    allow_reuse_address = True
+    daemon_threads = True
+
+    def __init__(self, address, stand):
+        self.stand = stand
+        super().__init__(address, StandControlRequestHandler)
+
+
+class StandControlRequestHandler(BaseHTTPRequestHandler):
+    """Handle control requests without exposing arbitrary ROS operations."""
+
+    protocol_version = "HTTP/1.1"
+
+    def _send_json(self, status, payload):
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _path(self):
+        return urlsplit(self.path).path.rstrip("/") or "/"
+
+    def do_GET(self):
+        if self._path() not in {"/health", "/demo"}:
+            self._send_json(404, {"ok": False, "error": "not_found"})
+            return
+        active = self.server.stand._get_demo_active()
+        self._send_json(
+            200,
+            {
+                "ok": True,
+                "demo_active": active,
+                "stand_version": STAND_BUILD_VERSION,
+                "standby_face_lost_grace_seconds": FACE_LOST_GRACE_SECONDS,
+                "demo_face_lost_grace_seconds": (
+                    FACE_LOST_GRACE_SECONDS
+                    + DEMO_FACE_LOST_EXTRA_GRACE_SECONDS
+                ),
+            },
+        )
+
+    def do_POST(self):
+        self._set_demo_state()
+
+    def do_PUT(self):
+        self._set_demo_state()
+
+    def _set_demo_state(self):
+        if self._path() != "/demo":
+            self._send_json(404, {"ok": False, "error": "not_found"})
+            return
+
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self._send_json(400, {"ok": False, "error": "invalid_length"})
+            return
+        if not 0 < content_length <= CONTROL_HTTP_MAX_BODY_BYTES:
+            self._send_json(400, {"ok": False, "error": "invalid_body_size"})
+            return
+
+        try:
+            payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._send_json(400, {"ok": False, "error": "invalid_json"})
+            return
+        active = payload.get("active") if isinstance(payload, dict) else None
+        if not isinstance(active, bool):
+            self._send_json(400, {"ok": False, "error": "active_must_be_boolean"})
+            return
+
+        changed = self.server.stand._set_demo_active(active)
+        self._send_json(
+            200,
+            {
+                "ok": True,
+                "demo_active": active,
+                "changed": changed,
+                "stand_version": STAND_BUILD_VERSION,
+            },
+        )
+
+    def log_message(self, format_string, *args):
+        rospy.logdebug("Stand control HTTP: " + format_string, *args)
 
 
 class QTStand:
@@ -226,12 +334,39 @@ class QTStand:
         self.current_expression = None
         self.last_expression_attempt_at = float("-inf")
         self.shutdown_complete = False
+        self.control_server = None
+        self.control_server_thread = None
 
         self._validate_configuration()
+        self._start_control_server()
 
         self.demo_state_publisher.publish(Bool(data=self.demo_active))
         rospy.loginfo("Using Haar cascade: %s", HAAR_CASCADE_PATH)
         rospy.loginfo("Initial demo state: %s", self._demo_label(self.demo_active))
+
+    def _start_control_server(self):
+        try:
+            self.control_server = StandControlHTTPServer(
+                (CONTROL_HTTP_BIND_HOST, CONTROL_HTTP_PORT),
+                self,
+            )
+        except OSError as error:
+            raise RuntimeError(
+                "Could not start standby control HTTP server on "
+                f"{CONTROL_HTTP_BIND_HOST}:{CONTROL_HTTP_PORT}: {error}"
+            ) from error
+        self.control_server_thread = threading.Thread(
+            target=self.control_server.serve_forever,
+            kwargs={"poll_interval": 0.2},
+            name=CONTROL_HTTP_THREAD_NAME,
+            daemon=True,
+        )
+        self.control_server_thread.start()
+        rospy.loginfo(
+            "Standby control HTTP listening on %s:%d.",
+            CONTROL_HTTP_BIND_HOST,
+            CONTROL_HTTP_PORT,
+        )
 
     @staticmethod
     def _demo_label(active):
@@ -468,10 +603,13 @@ class QTStand:
             )
         self.last_face_seen_at = now
 
-    def _face_is_active(self, now):
+    def _face_is_active(self, now, demo_active):
         if self.last_face_seen_at is None:
             return False
-        if now - self.last_face_seen_at <= FACE_LOST_GRACE_SECONDS:
+        grace_seconds = FACE_LOST_GRACE_SECONDS
+        if demo_active:
+            grace_seconds += DEMO_FACE_LOST_EXTRA_GRACE_SECONDS
+        if now - self.last_face_seen_at <= grace_seconds:
             return True
         self.tracked_face = None
         self.last_face_seen_at = None
@@ -811,8 +949,12 @@ class QTStand:
             force=True,
         )
         rospy.loginfo(
-            "QT standby started. Face tracking is always active; demo is %s.",
+            "QT standby %s started. Face tracking is always active; "
+            "demo is %s (face-loss grace %.1fs standby / %.1fs demo).",
+            STAND_BUILD_VERSION,
             self._demo_label(self._get_demo_active()),
+            FACE_LOST_GRACE_SECONDS,
+            FACE_LOST_GRACE_SECONDS + DEMO_FACE_LOST_EXTRA_GRACE_SECONDS,
         )
 
         rate = rospy.Rate(MAIN_LOOP_HZ)
@@ -823,7 +965,7 @@ class QTStand:
 
             detections = self._detect_faces(now)
             self._update_face_lock(detections, now)
-            face_active = self._face_is_active(now)
+            face_active = self._face_is_active(now, demo_active)
 
             if face_active:
                 if not self.face_was_active:
@@ -876,6 +1018,11 @@ class QTStand:
             return
         self.shutdown_complete = True
         rospy.loginfo("Returning QTrobot to its centered neutral state.")
+        if self.control_server is not None:
+            self.control_server.shutdown()
+            self.control_server.server_close()
+        if self.control_server_thread is not None:
+            self.control_server_thread.join(timeout=1.0)
         now = time.monotonic()
         self._set_expression(NEUTRAL_EXPRESSION, now, force=True)
         self.head_publisher.publish(

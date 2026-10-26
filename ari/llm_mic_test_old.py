@@ -114,7 +114,7 @@ def main(args):
     mic = ContinuousMic(
         device=args.device,
         vad="silero",
-        model_size="small",
+        model_size="medium",
         language="nl",
         enable_partials=False,
         end_silence_ms=800,

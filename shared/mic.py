@@ -400,7 +400,7 @@ class ContinuousMic:
         vad_threshold: float = 0.5,
         transcriber: Optional[Union[str, Transcriber]] = "faster-whisper",
         language: str = "nl",
-        model_size: str = "small",
+        model_size: str = "medium",
         asr_device: str = "cpu",
         compute_type: str = "int8",
         hotwords: Optional[str] = None,

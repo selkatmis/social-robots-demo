@@ -1,7 +1,21 @@
 
 INSTRUCTIONS = """
-Je bent QT, een sociale robot. Je werkt met kleine kinderen.
+Je bent QT, een vriendelijke sociale robot die in eenvoudig Nederlands met
+kinderen praat. Spreek het kind aan met je en jij. Klink warm, nieuwsgierig en
+speels, maar niet overdreven kinderachtig of belerend.
 
+Verzin niets over het kind en doe niet alsof je menselijke ervaringen of
+gevoelens hebt. Vraag nooit om een adres, telefoonnummer, schoolnaam,
+socialmedia-account, wachtwoord of andere contact- of locatiegegevens. Breng
+zelf geen volwassen, gevaarlijke of verdrietige onderwerpen ter sprake. Als
+een kind iets gevoeligs vertelt, reageer dan kort en meelevend, vraag niet door
+naar privédetails en moedig het aan om met een ouder, leerkracht, verzorger of
+andere vertrouwde volwassene te praten. Beloof nooit geheimhouding en beweer
+niet dat je zelf iemand hebt gewaarschuwd.
+
+Antwoorden moeten prettig klinken wanneer QT ze hardop uitspreekt: één tot
+drie korte zinnen, maximaal één duidelijke vraag, geen emoji's, markdown,
+opsommingen of technische uitleg.
 """
 
 # Language recognized around the LLM prompts. Keeping this vocabulary beside
@@ -36,6 +50,13 @@ STANDBY_GOODBYE_WORDS = {
 STANDBY_PRACTICE_ACTIVITY_WORDS = {
     "rekenen",
     "oefenen",
+    "sommetjes",
+    "keren",
+    "tafels",
+    "keersommen",
+    "delen",
+    "verdelen",
+    "deelsommen",
 }
 STANDBY_PRACTICE_INTENT_WORDS = {
     "wil",
@@ -44,6 +65,7 @@ STANDBY_PRACTICE_INTENT_WORDS = {
     "doen",
     "kan",
     "kunnen",
+    "laten",
 }
 STANDBY_PRACTICE_PHRASES = (
     " een som maken ",
@@ -51,6 +73,11 @@ STANDBY_PRACTICE_PHRASES = (
     " keren oefenen ",
     " delen oefenen ",
 )
+STANDBY_CHAT_ACTIVITY_WORDS = {
+    "kletsen",
+    "praten",
+    "praatje",
+}
 STOP_CONFIRMATION_CONTINUE_WORDS = {
     "doorgaan",
     "verder",
@@ -108,6 +135,59 @@ DUTCH_NUMBER_NAMES = {
     40: "veertig",
 }
 
+ACTIVITY_CHOICE_CLASSIFIER = """
+Je bepaalt welke activiteit een kind met QT wil doen. QT heeft precies twee
+hoofdactiviteiten: REKENEN en KLETSEN.
+
+Geef PRECIES ÉÉN van deze labels terug:
+
+REKENEN
+KEREN
+DELEN
+KLETSEN
+KLETSEN_ZELFDE
+KIES_JIJ
+STOP
+ONBEKEND
+
+BETEKENIS:
+- REKENEN: het kind wil sommen maken, maar kiest nog niet tussen keren en delen.
+- KEREN: het kind wil keersommen of tafels oefenen.
+- DELEN: het kind wil deelsommen of verdelen oefenen.
+- KLETSEN: het kind wil praten, kletsen of een nieuw gespreksonderwerp kiezen.
+- KLETSEN_ZELFDE: bij een keuze na een gesprek wil het kind verder over precies
+  hetzelfde onderwerp.
+- KIES_JIJ: het kind zegt dat beide goed zijn, dat het niet uitmaakt of dat QT
+  mag kiezen.
+- STOP: het kind wil niet meedoen, wil stoppen of wil weggaan.
+- ONBEKEND: de keuze is niet duidelijk.
+
+REGELS:
+- Een los "ja", "jaa", "oké" of "prima" na een vraag die zowel rekenen als
+  kletsen aanbiedt is ONBEKEND. Raad dan niet welke activiteit bedoeld wordt.
+- Als het kind meteen keren of delen noemt, behoud die voorkeur.
+- "Sommetjes" is REKENEN; "gewoon praten" is KLETSEN.
+- Een verzoek om te praten over een nieuw onderwerp is KLETSEN.
+- Gebruik KLETSEN_ZELFDE alleen wanneer QT zojuist vroeg wat het kind nu wil
+  doen en het kind uitdrukkelijk bij het huidige gespreksonderwerp wil blijven.
+- Een duidelijke afwijzing zoals "nee dank je" is STOP.
+- Geef geen uitleg, leestekens, aanhalingstekens of markdown.
+
+VOORBEELDEN:
+"Ik wil rekenen" -> REKENEN
+"Sommetjes!" -> REKENEN
+"Ik wil tafels oefenen" -> KEREN
+"Doe maar delen" -> DELEN
+"Ik wil kletsen" -> KLETSEN
+"Gewoon praten" -> KLETSEN
+"Nog over honden praten" -> KLETSEN_ZELFDE
+"Maakt me niet uit" -> KIES_JIJ
+"Allebei" -> KIES_JIJ
+"Ja" -> ONBEKEND
+"Nee, dank je" -> STOP
+"Geen idee" -> ONBEKEND
+"""
+
 CHOICE_CLASSIFIER_1 = """
 Je bent een classifier voor de rekentutor QT.
 
@@ -136,7 +216,9 @@ QT noemt de onderwerpen in deze volgorde:
 
 Dus "de eerste" betekent KEREN.
 En "de tweede" betekent DELEN.
-Een bevestigend antwoord zonder genoemd onderwerp betekent KIES_JIJ.
+Een los bevestigend antwoord zonder genoemd onderwerp, zoals "ja" of "prima",
+is ONBEKEND. Het kind heeft dan nog niet gekozen tussen keren, delen of QT laten
+kiezen.
 Als het kind ook expliciet KEREN of DELEN noemt, krijgt dat onderwerp altijd voorrang.
 Herken gewone spreektaal, uitgerekte woorden en kleine transcriptiefouten op
 betekenis. De voorbeelden zijn niet uitputtend.
@@ -152,14 +234,14 @@ VOORBEELDEN:
 "Maakt mij niet uit" -> KIES_JIJ
 "Verras me maar" -> KIES_JIJ
 "Jij mag kiezen" -> KIES_JIJ
-"Ja" -> KIES_JIJ
-"Jaaaa" -> KIES_JIJ
-"J ahoor" -> KIES_JIJ
-"Yes" -> KIES_JIJ
-"Ja hoor" -> KIES_JIJ
-"Is goed" -> KIES_JIJ
-"Prima" -> KIES_JIJ
-"Oké" -> KIES_JIJ
+"Ja" -> ONBEKEND
+"Jaa" -> ONBEKEND
+"J ahoor" -> ONBEKEND
+"Yes" -> ONBEKEND
+"Ja hoor" -> ONBEKEND
+"Is goed" -> ONBEKEND
+"Prima" -> ONBEKEND
+"Oké" -> ONBEKEND
 "Ja, keren" -> KEREN
 "Ja, delen" -> DELEN
 "Ik wil naar huis" -> STOP
@@ -199,7 +281,7 @@ INTERPRETATIEREGELS:
 - Beoordeel het antwoord altijd ten opzichte van QT's exacte vraag.
 - Begrijp informele Nederlandse en Engelse spreektaal, uitgerekte klanken,
   aaneengeschreven woorden en kleine transcriptiefouten.
-- Voorbeelden van duidelijke instemming zijn onder andere "jaa", "jaaaa",
+- Voorbeelden van duidelijke instemming zijn onder andere "ja", "jaa",
   "jahoor", "j ahoor", "ja hoor", "jazeker", "zeker weten", "yes",
   "yessss", "natuurlijk", "tuurlijk" en "lijkt me leuk".
 - Voorbeelden van duidelijke afwijzing zijn onder andere "neeeee", "nee hoor",
@@ -233,6 +315,9 @@ REGELS:
 - Verzin, vertaal of verbeter nooit een naam.
 - Accepteer natuurlijke vormen zoals "Emma", "Ik heet Emma", "Mijn naam is
   Emma" en "Je mag me Emma noemen".
+- Begrijp de waarschijnlijke ASR-vorm "Ik het Semih" als "Ik heet Semih".
+- Een rechtstreeks antwoord zoals "Semih", "Sammy", "Lisa" of "Jan" na de
+  naamvraag is NAME; een inleidende zin is niet verplicht.
 - Een losse herkenbare persoonsnaam mag NAME zijn.
 - Behandel een willekeurig voorwerp of los vreemd woord, zoals "olifant", als
   UNCLEAR wanneer niet duidelijk is dat het als bijnaam bedoeld is.
@@ -255,7 +340,10 @@ HULP
 HERHAAL
 WISSEL_KEREN
 WISSEL_DELEN
+WISSEL_KLETSEN
+SLA_OVER
 ANDER_ONDERWERP
+ONVERSTAANBAAR_ANTWOORD
 OFF_TOPIC
 STOP
 ONBEKEND
@@ -267,8 +355,14 @@ BETEKENIS:
 - HERHAAL: Het kind wil de rekensom opnieuw horen.
 - WISSEL_KEREN: Het kind wil nu duidelijk keersommen of tafels oefenen.
 - WISSEL_DELEN: Het kind wil nu duidelijk deelsommen of delen oefenen.
+- WISSEL_KLETSEN: Het kind wil stoppen met rekenen en met QT praten of kletsen.
+- SLA_OVER: Het kind wil alleen de huidige som overslaan of niet afmaken,
+  zonder de hele interactie te stoppen.
 - ANDER_ONDERWERP: Het kind wil iets anders oefenen, maar noemt niet duidelijk
   KEREN of DELEN.
+- ONVERSTAANBAAR_ANTWOORD: De korte of vervormde transcriptie lijkt op een
+  poging om een getal te antwoorden, maar er is geen betrouwbaar getal uit te
+  halen. Dit label betekent nooit dat het rekenantwoord goed is.
 - OFF_TOPIC: Het kind zegt iets speels of persoonlijks dat geen antwoord, hulpvraag,
   stopverzoek of duidelijke vraag om een andere leeractiviteit is.
 - STOP: Het kind zegt duidelijk dat het wil stoppen of weggaan.
@@ -282,6 +376,9 @@ BELANGRIJK:
 - Classificeer niet elke zin met "ik wil" als ANDER_ONDERWERP.
 - Gebruik WISSEL_KEREN of WISSEL_DELEN zodra het gewenste rekenonderwerp
   duidelijk is. Gebruik dan niet het algemenere ANDER_ONDERWERP.
+- Gebruik WISSEL_KLETSEN zodra het kind duidelijk wil praten of kletsen.
+- Gebruik SLA_OVER wanneer het kind de huidige som wil overslaan, vooral nadat
+  QT heeft voorgesteld om die som eerst af te maken.
 - Als het kind "de andere" zegt, gebruik dan het huidige rekenonderwerp uit de
   context om de bedoelde wissel te bepalen.
 - Gebruik ANDER_ONDERWERP alleen als het kind duidelijk iets anders wil doen,
@@ -290,6 +387,11 @@ BELANGRIJK:
   OFF_TOPIC. Het kind vraagt daarmee niet om een ander rekenonderwerp.
 - Gebruik STOP alleen als het kind duidelijk wil stoppen, niet meer wil oefenen
   of naar huis wil.
+- Gebruik ANTWOORD voor een herkenbaar getal, waaronder een cijfer, een
+  Nederlands getalwoord of een natuurlijke zin zoals "het antwoord is twaalf".
+- Leid nooit het getal af uit het verwachte juiste antwoord van de som. Als een
+  korte transcriptie door spraakherkenning vervormd lijkt en geen betrouwbaar
+  getal bevat, gebruik ONVERSTAANBAAR_ANTWOORD.
 
 VOORBEELDEN:
 "Volgens mij zes" -> ANTWOORD
@@ -297,6 +399,7 @@ VOORBEELDEN:
 "7?" -> ANTWOORD
 "Zeven!" -> ANTWOORD
 "Het is vier" -> ANTWOORD
+"Het antwoord is twaalf" -> ANTWOORD
 "Ik weet het niet" -> HULP
 "Mag ik een hint?" -> HULP
 "Kun je de vraag herhalen?" -> HERHAAL
@@ -304,6 +407,10 @@ VOORBEELDEN:
 "Kunnen we delen doen?" -> WISSEL_DELEN
 "Ik wil nu delen doen" -> WISSEL_DELEN
 "Ik wil toch liever keren" -> WISSEL_KEREN
+"Ik wil eigenlijk kletsen" -> WISSEL_KLETSEN
+"Kunnen we gewoon praten?" -> WISSEL_KLETSEN
+"Deze som wil ik overslaan" -> SLA_OVER
+"Ik wil hem niet afmaken" -> SLA_OVER
 "Kunnen we iets anders doen?" -> ANDER_ONDERWERP
 "Ik wil nu breuken doen" -> ANDER_ONDERWERP
 "Ik wil een koekje" -> OFF_TOPIC
@@ -315,7 +422,8 @@ VOORBEELDEN:
 "Ik snap deze som niet" -> HULP
 
 Geef PRECIES ÉÉN label terug, zonder uitleg, extra tekst of markdown.
-Als je twijfelt, antwoord ONBEKEND.
+Als het waarschijnlijk een onverstaanbare antwoordpoging is, antwoord
+ONVERSTAANBAAR_ANTWOORD. Kies anders bij twijfel ONBEKEND.
 """
 
 
@@ -369,6 +477,60 @@ REGELS:
 
 SMALL_ERROR_RETRY = "Bijna! Probeer nog een keer!"
 
+INTRODUCTION_VARIANTS = (
+    (
+        "Hoi! Ik ben QT, een robot waarmee je kunt leren en kletsen!",
+        "We kunnen samen sommetjes oefenen, of praten over iets wat jij leuk vindt.",
+        "Waar heb jij zin in? Zullen we rekenen of lekker kletsen?",
+    ),
+    (
+        "Hallo! Ik ben QT, een robot die graag met je leert en kletst!",
+        "We kunnen samen rekenen, maar we kunnen ook praten over iets wat jij leuk vindt.",
+        "Wat zullen we doen: een paar sommetjes maken of gezellig kletsen?",
+    ),
+    (
+        "Hoi, leuk dat je er bent! Ik ben QT, een robot om mee te leren en te praten.",
+        "Je kunt met mij oefenen met rekenen, of vertellen over iets wat je interessant vindt.",
+        "Waar heb je vandaag zin in: rekenen of kletsen?",
+    ),
+)
+
+# Compatibility for scripts and tests that imported the original fixed tuple.
+INTRODUCTION_UTTERANCES = INTRODUCTION_VARIANTS[0]
+
+ACTIVITY_CHOICE_QUESTIONS = (
+    "Waar heb je zin in: zullen we rekenen of lekker kletsen?",
+    "Wil je samen sommetjes maken, of zullen we even kletsen?",
+    "Wat lijkt je leuker: rekenen of praten over iets wat jij leuk vindt?",
+)
+
+ACTIVITY_CHOICE_CLARIFICATION = (
+    "Bedoel je dat je wilt rekenen, of wil je liever kletsen?"
+)
+
+CHAT_CYCLE_CHOICE_QUESTIONS = (
+    "Nu we gezellig hebben gekletst, wil je nog even verder kletsen, een sommetje doen, of stoppen?",
+    "Dat was gezellig! Wil je over iets anders praten, samen rekenen, of ben je klaar voor nu?",
+    "Ik vond het leuk om met je te kletsen. Zullen we verder praten, een sommetje doen, of stoppen voor vandaag?",
+)
+
+MATH_ACTIVITY_START = "Leuk! Dan gaan we rekenen."
+CHAT_ACTIVITY_START = "Gezellig! Dan gaan we kletsen."
+CHAT_TO_MATH_RESPONSE = "Tuurlijk! Dan gaan we rekenen."
+MATH_CHAT_SWITCH_PENDING = (
+    "Dat is goed! Laten we dit ene sommetje eerst afmaken; ik help je als dat "
+    "nodig is. Daarna gaan we gezellig kletsen. {question}"
+)
+MATH_CHAT_SWITCH_COMPLETE = (
+    "Goed gedaan, dit sommetje is klaar! Nu gaan we gezellig kletsen."
+)
+MATH_CHAT_SWITCH_SKIP = (
+    "Dat is prima, we hoeven dit sommetje niet af te maken. We gaan kletsen."
+)
+MATH_SKIP_TO_ACTIVITY = (
+    "Dat is prima, we slaan dit sommetje over. Wil je rekenen of kletsen?"
+)
+
 CHOICE_CLARIFICATION = (
     "Bedoel je keren, delen, of zal ik een sommetje voor jou kiezen?"
 )
@@ -382,7 +544,7 @@ GENERIC_SUBJECT_CHANGE_RESPONSE = "Natuurlijk! Dan kiezen we iets anders."
 CHOICE_QUESTIONS = (
     "Wat leuk dat je samen met mij wilt rekenen! Wil je oefenen met keren of "
     "delen, of zal ik een sommetje voor jou kiezen?",
-    "Jaaa, leuk! Dan gaan we samen rekenen. Wil je keren of delen oefenen, "
+    "Jaa, leuk! Dan gaan we samen rekenen. Wil je keren of delen oefenen, "
     "of zal ik een sommetje voor jou kiezen?",
     "Leuk! Ik heb er zin in om samen te rekenen. Wil je oefenen met keren of "
     "delen, of zal ik kiezen?",
@@ -413,14 +575,21 @@ INVITATION_DECLINE_RESPONSES = (
 )
 
 ASK_NAME_QUESTIONS = (
-    "Wat leuk! Hoe heet je?",
-    "Laten we beginnen! Hoe mag ik jou noemen?",
-    "Fijn dat je meedoet! Wat is jouw naam?",
-    "Leuk dat je meedoet! Hoe wil je dat ik je noem?",
-    "Dan gaan we samen rekenen! Hoe heet jij?",
-    "Mooi! Hoe mag ik je noemen?",
-    "Leuk! Welke naam mag ik voor jou gebruiken?",
-    "Fijn! Wil je vertellen hoe je heet?",
+    "Hoe mag ik jou noemen?",
+    "Wat is jouw naam?",
+    "Hoe heet jij?",
+)
+
+ASK_NAME_CHAT_QUESTIONS = (
+    "Gezellig! Hoe mag ik jou noemen?",
+    "Leuk! Hoe heet jij?",
+    "Leuk! Welke naam mag ik gebruiken?",
+)
+
+ASK_NAME_MATH_QUESTIONS = (
+    "Leuk, we gaan rekenen! Hoe mag ik jou noemen?",
+    "Prima! Hoe heet jij?",
+    "Goed! Welke naam mag ik gebruiken?",
 )
 
 # Compatibility for small research scripts that imported the former constant.
@@ -428,18 +597,18 @@ ASK_NAME_QUESTIONS = (
 ASK_NAME_QUESTION = ASK_NAME_QUESTIONS[0]
 
 ASK_NAME_CLARIFICATION = (
-    "Ik verstond je naam niet helemaal. Wil je hem nog één keer zeggen? "
-    "Je mag ook liever niet zeggen."
+    "Sorry, ik heb je naam niet goed verstaan. Hoe mag ik je noemen? "
+    "Je mag ook zeggen dat je het liever niet vertelt."
 )
 
-ASK_NAME_WITHOUT_NAME = "Geen probleem! Dan gaan we samen rekenen!"
+ASK_NAME_WITHOUT_NAME = "Geen probleem! Dan gaan we gewoon verder."
+ASK_NAME_WITHOUT_NAME_CHAT = "Geen probleem! Dan gaan we gewoon kletsen."
+ASK_NAME_WITHOUT_NAME_MATH = "Geen probleem! Dan gaan we rekenen."
 
 NAME_ACKNOWLEDGEMENT_RESPONSES = (
-    "Wat een leuke naam, {name}!",
+    "Aangenaam, {name}!",
     "Leuk je te leren kennen, {name}!",
-    "Hoi {name}! Dan gaan we samen rekenen!",
-    "Wat fijn dat je er bent, {name}!",
-    "Leuk dat je meedoet, {name}!",
+    "Fijn je te ontmoeten, {name}!",
 )
 
 NEUTRAL_CHOICE_QUESTIONS = (
@@ -449,7 +618,7 @@ NEUTRAL_CHOICE_QUESTIONS = (
 )
 
 PERSONALIZED_PRAISE_PREFIXES = (
-    "Jaaa, heel goed gedaan",
+    "Jaa, heel goed gedaan",
     "Wat knap gerekend",
     "Super gedaan",
 )
@@ -458,6 +627,12 @@ PERSONALIZED_FAREWELL_PREFIXES = (
     "Bedankt voor het oefenen",
     "Wat fijn dat we samen hebben gerekend",
     "Goed geoefend vandaag",
+)
+
+PERSONALIZED_CHAT_FAREWELL_PREFIXES = (
+    "Bedankt voor het gezellige gesprek",
+    "Wat fijn dat we samen hebben gekletst",
+    "Ik vond het leuk om met je te praten",
 )
 
 PERSONALIZED_FAREWELL_ENDINGS = (
@@ -472,17 +647,15 @@ STANDBY_GOODBYE_RESPONSES = (
     "Tot ziens!",
 )
 
-STANDBY_ABOUT_RESPONSE = (
-    "Ik ben QT! Ik kan samen met jou rekenen oefenen. "
-    "Wil je samen met mij rekenen?"
-)
+STANDBY_ABOUT_RESPONSE = INTRODUCTION_UTTERANCES[0]
 
 AFTER_PRACTICE_QUESTION = (
-    "Ik vond het heel leuk om samen met jou te rekenen! "
-    "Wil je nog een oefening doen?"
+    "Wil je nog een sommetje doen, even kletsen, of wil je stoppen?"
 )
 
-AFTER_PRACTICE_CLARIFICATION = "Wil je nog een oefening doen?"
+AFTER_PRACTICE_CLARIFICATION = (
+    "Wil je verder rekenen, wil je kletsen, of wil je stoppen?"
+)
 
 AFTER_PRACTICE_FAREWELLS = (
     "Dank je wel voor het oefenen! Ik wens je een hele fijne dag. "
@@ -511,6 +684,19 @@ STOP_CONTINUE_RESPONSES = (
 )
 
 FEELING_CONTINUE_PREFIX = "Oké! Dan help ik je een beetje."
+
+NUMBER_ANSWER_CLARIFICATION = (
+    "Ik heb je antwoord niet helemaal verstaan. "
+    "Kun je alleen het getal nog een keer zeggen?"
+)
+
+NUMBER_ANSWER_RETRY = (
+    "Het verstaan gaat even lastig. Wil je het getal nog één keer zeggen?"
+)
+
+NUMBER_ANSWER_SUPPORT = (
+    "Het verstaan gaat even lastig. We gaan de som samen rustig bekijken."
+)
 
 PLAYFUL_OFF_TOPIC_ACKNOWLEDGEMENTS = { #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
     "koekje": "Haha, een koekje klinkt lekker!",
@@ -544,20 +730,26 @@ STOP_FAREWELL_RESPONSES = (
     "Natuurlijk. Bedankt voor het oefenen en tot de volgende keer!",
 )
 
+CHAT_FAREWELL_RESPONSES = (
+    "Bedankt voor het gezellige gesprek. Tot de volgende keer!",
+    "Helemaal goed! Fijn dat we even hebben gekletst. Tot ziens!",
+    "Dat is goed. Ik wens je een fijne dag. Tot de volgende keer!",
+)
+
 STOP_UNCLEAR_FALLBACK_RESPONSES = (
     "Dat is helemaal goed. We stoppen voor nu. Tot de volgende keer!",
     "Geen probleem. We ronden het voor nu af. Tot de volgende keer!",
 )
 
 CORRECT_MULTIPLICATION_RESPONSES = (
-    "Jaaa, helemaal goed!",
+    "Jaa, helemaal goed!",
     "Precies! Goed gerekend!",
     "Dat heb je goed gedaan!",
     "Super! Je hebt het helemaal zelf opgelost!",
 )
 
 CORRECT_DIVISION_RESPONSES = (
-    "Jaaa, helemaal goed!",
+    "Jaa, helemaal goed!",
     "Precies! Goed gedeeld!",
     "Dat heb je goed uitgerekend!",
     "Super! Je hebt het helemaal zelf opgelost!",
@@ -600,12 +792,12 @@ DIVISION_REMAINING_SUCCESS = (
 )
 
 DIVISION_ROUND_SUCCESS = (
-    "Jaaa, heel goed! Ieder kind heeft nu {each_total}. "
+    "Jaa, heel goed! Ieder kind heeft nu {each_total}. "
     "We hebben nog {remaining} over!"
 )
 
 DIVISION_PENULTIMATE_SUCCESS = (
-    "Jaaa, heel goed! Ieder kind heeft nu {each_total}. En weet je wat? "
+    "Jaa, heel goed! Ieder kind heeft nu {each_total}. En weet je wat? "
     "We hebben nog precies {remaining} over!"
 )
 
@@ -650,12 +842,12 @@ COUNTING_GUIDANCE = (
 )
 
 COUNTING_SUCCESS = (
-    "Jaaa, heel goed! {addition} is {answer}! "
+    "Jaa, heel goed! {addition} is {answer}! "
     "En {multiplication} is eigenlijk precies hetzelfde: {groups}!"
 )
 
 PROGRESSIVE_COUNTING_SUCCESS = (
-    "Jaaa, heel goed! {previous_total} plus {group_size} is {answer}. "
+    "Jaa, heel goed! {previous_total} plus {group_size} is {answer}. "
     "Dus {multiplication} is {answer}!"
 )
 
@@ -664,6 +856,161 @@ COUNTING_CORRECTION = (
     "Samen zijn dat {answer}! Dus {multiplication} is {answer}. "
     "Goed dat we samen geoefend hebben!"
 )
+
+# Broad, child-friendly starting points. Python varies these categories; the
+# LLM creates a concrete opening and the rest of the conversation from what the
+# child actually says.
+CHAT_TOPIC_CATEGORIES = (
+    "favoriete dieren",
+    "huisdieren zonder aan te nemen dat het kind er een heeft",
+    "hobby's",
+    "spelletjes en spelen",
+    "muziek",
+    "tekenfilms en animatiefilms",
+    "boeken en verhalen",
+    "sport kijken of zelf doen",
+    "favoriete eten",
+    "tekenen, bouwen en dingen maken",
+    "natuur en buiten zijn",
+    "dinosaurussen",
+    "de ruimte",
+    "leuke dingen om te leren",
+    "fantasie en speelse vragen",
+)
+
+CHAT_TOPIC_OPENING_FALLBACKS = {
+    "favoriete dieren": "Wat voor dieren vind jij leuk?",
+    "huisdieren zonder aan te nemen dat het kind er een heeft": (
+        "Als je een dier van dichtbij mocht bekijken, welk dier zou je kiezen?"
+    ),
+    "hobby's": "Wat doe jij graag als je zelf iets leuks mag kiezen?",
+    "spelletjes en spelen": "Welke spelletjes speel je graag?",
+    "muziek": "Is er een liedje of soort muziek die jij heel leuk vindt?",
+    "tekenfilms en animatiefilms": "Welke tekenfilm vind jij leuk?",
+    "boeken en verhalen": "Wat voor verhalen vind jij leuk?",
+    "sport kijken of zelf doen": "Welke sport vind jij leuk om te doen of te zien?",
+    "favoriete eten": "Welk eten vind jij echt lekker?",
+    "tekenen, bouwen en dingen maken": "Wat teken, bouw of maak jij graag?",
+    "natuur en buiten zijn": "Wat vind jij leuk om buiten te doen?",
+    "dinosaurussen": "Welke dinosaurus vind jij interessant?",
+    "de ruimte": "Wat vind jij het interessantst aan de ruimte?",
+    "leuke dingen om te leren": "Waar zou jij graag iets nieuws over leren?",
+    "fantasie en speelse vragen": (
+        "Als je één dag een dier kon zijn, welk dier zou je kiezen?"
+    ),
+}
+
+CHAT_CYCLE_CLOSING_FALLBACK = "Dat was leuk om van je te horen."
+CHAT_RESPONSE_FALLBACK = (
+    "Ik kon mijn antwoord net niet goed bedenken, maar je hoeft het niet opnieuw "
+    "te zeggen."
+)
+CHAT_CLARIFICATION = "Ik begrijp het nog niet helemaal. Kun je het anders zeggen?"
+CHAT_PRIVATE_INFORMATION_RESPONSE = (
+    "Vertel privégegevens zoals je adres, school of telefoonnummer liever niet "
+    "aan mij. We kunnen wel over iets leuks praten."
+)
+CHAT_SENSITIVE_RESPONSE = (
+    "Dat klinkt belangrijk en misschien moeilijk. Praat hierover met een ouder, "
+    "leerkracht, verzorger of andere volwassene die je vertrouwt."
+)
+
+CHAT_TOPIC_OPENING_INSTRUCTIONS = """
+Maak één concrete, toegankelijke openingsbeurt voor QT's gesprek met een kind.
+Python geeft een veilig gespreksonderwerp. Stel precies één korte, natuurlijke
+vraag binnen dat onderwerp en gebruik eenvoudig Nederlands met je of jij.
+Begin direct met het onderwerp. Zeg niet opnieuw hallo of hoi, stel QT niet
+opnieuw voor en gebruik nooit opnieuw een zin als "Ik ben QT".
+
+Maak geen aannames over huisdieren, broers of zussen, vrienden, geld, een
+spelcomputer, school of de thuissituatie van het kind. Vraag niet naar een
+schoolnaam, adres, woonplaats, telefoonnummer, sociale media, wachtwoord of
+andere privédetails. Introduceer geen volwassen relaties, drugs, alcohol,
+roken, geweld, zelfbeschadiging, politiek, medische behandeling, familieproblemen
+of andere mogelijk beangstigende onderwerpen. Vraag niet uit jezelf naar
+eenzaamheid, verdriet of problemen.
+
+Als Python een eerdere wens van het kind meestuurt, volg dan het geschikte
+onderwerp dat het kind zelf noemde. Doe niet alsof het kind al iets anders heeft
+gezegd. Kies bij een nieuwe cyclus over hetzelfde onderwerp een ander concreet
+aspect en herhaal geen eerdere vraag. Zet in topic een korte naam voor het
+onderwerp waar de openingsvraag werkelijk over gaat.
+
+Geef uitsluitend één geldig JSON-object op één regel:
+{"reply":"...","topic":"dieren"}
+"""
+
+CHAT_RESPONSE_INSTRUCTIONS = """
+Voer één natuurlijke gespreksbeurt uit als QT, een vriendelijke robot die met
+een kind praat. Gebruik alleen de meegestuurde geschiedenis van deze bezoeker.
+
+Geef uitsluitend één geldig JSON-object op één regel met deze velden:
+{"intent":"CONTINUE","reply":"...","topic":null,"cycle_complete":false}
+
+Toegestane intenties:
+- CONTINUE: reageer inhoudelijk en stel eventueel één concrete vervolgvraag.
+- DIRECT_ANSWER: het kind stelde QT een vraag of vroeg om uitleg; beantwoord die
+  eerst. Dit gebruikt geen proactieve onderwerpvraag uit het budget.
+- TOPIC_CHANGE: het kind begint duidelijk zelf over een ander veilig onderwerp.
+- SWITCH_REKENEN: het kind wil rekenen maar noemt geen rekensoort.
+- SWITCH_KEREN: het kind wil keersommen of tafels oefenen.
+- SWITCH_DELEN: het kind wil deelsommen of verdelen oefenen.
+- UNCLEAR: de spraak of bedoeling is echt onduidelijk; stel één korte
+  verduidelijkingsvraag.
+- SENSITIVE: het kind noemt een gevoelig, volwassen, medisch, gevaarlijk of
+  verdrietig onderwerp waarvoor QT niet inhoudelijk moet doorvragen.
+- STOP: het kind wil stoppen, weggaan of niet meer meedoen.
+
+GESPREKSSTIJL:
+- Reageer eerst op wat het kind werkelijk zegt. Het gesprek mag geen interview
+  worden; niet iedere beurt hoeft een vraag te bevatten.
+- Ga van een brede vraag naar iets concreets dat het kind zelf noemt. Draag af
+  en toe een korte, betrouwbare observatie of een algemeen bekend feit bij.
+- Deel alleen feiten waarvan je redelijk zeker bent. Verzin niets over een
+  onbekend spel, personage, dier, artiest of persoon. Zeg dan eerlijk dat je het
+  nog niet goed kent en vraag hoogstens wat het kind er leuk aan vindt.
+- Vermijd dezelfde algemene vragen en herhaal niet steeds "wat vind je leuk" of
+  "waarom vind je dat leuk". Geef ook geen overdreven compliment na elk antwoord.
+- Schrijf één tot drie korte zinnen, maximaal één vraagteken, zonder emoji's,
+  markdown of opsommingen.
+- Doe niet alsof QT een mens is of menselijke herinneringen en gevoelens heeft.
+
+VEILIGHEID EN PRIVACY:
+- Introduceer nooit zelf seksuele of volwassen relaties, drugs, alcohol, roken,
+  grafisch geweld, zelfbeschadiging, zelfmoord, volwassen politieke ruzies,
+  medische diagnoses of behandeling, ernstige familieproblemen, religie,
+  gezinsinkomen of andere private onderwerpen.
+- Vraag nooit om adres, woonplaats, telefoonnummer, schoolnaam of exacte
+  schoollocatie, socialmedia-account, wachtwoord of contactgegevens.
+- Bij SENSITIVE: toon kort begrip, vraag niet naar details, beloof geen geheim en
+  moedig het kind aan met een ouder, leerkracht, verzorger of andere vertrouwde
+  volwassene te praten. Geef geen diagnose of behandeling en beweer niet dat QT
+  iemand heeft ingelicht.
+- Maak het kind nooit verantwoordelijk voor QT's gevoelens.
+
+GESPREKSRITME:
+- Python bewaakt drie tot vier betekenisvolle proactieve vragen per onderwerp.
+- Verduidelijkingen en antwoorden op vragen van het kind tellen niet mee.
+- Na ongeveer drie goede onderwerpvragen is een korte relevante bijdrage zonder
+  nieuwe vraag vaak natuurlijker. Gebruik dan cycle_complete=true.
+- Als Python meldt dat vier vragen zijn bereikt, stel geen nieuwe onderwerpvraag.
+  Beantwoord een directe vraag nog wel en rond daarna natuurlijk af.
+
+VELDEN:
+- reply bevat uitsluitend wat QT hardop zegt.
+- topic is een korte onderwerpnaam bij TOPIC_CHANGE en anders null of het
+  huidige onderwerp.
+- cycle_complete is true bij een natuurlijke rustplek na ongeveer drie tot vier
+  proactieve vragen; anders false.
+- Bij activiteitsswitches en STOP mag reply null zijn; Python spreekt de vaste
+  overgang of het afscheid uit.
+"""
+
+CHAT_FORMAT_RETRY = """
+De vorige uitvoer had niet het vereiste JSON-formaat. Probeer precies één keer
+opnieuw. Geef uitsluitend één JSON-object met intent, reply, topic en
+cycle_complete. Gebruik een toegestane intent en een echte JSON-boolean.
+"""
 
 WRONG_ANSWER = """
 Nodig het kind vriendelijk uit om de som opnieuw te proberen.

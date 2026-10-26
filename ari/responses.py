@@ -47,6 +47,8 @@ def make_initial_state() -> dict[str, Any]:
         "current_topic": None,
         "conversation_context": None,
         "pending_stop_confirmation": None,
+        "pending_clarification": None,
+        "pending_name_confirmation": None,
         "pending_initial_message": None,
         "session_turn_count": 0,
         "invitation_attempts": 0,
@@ -200,6 +202,68 @@ def _clean_topic(value: Any) -> str | None:
     return topic
 
 
+def _validate_conversation_response(
+    raw_response: Any,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Validate one conversation result without exposing private content."""
+    parsed = _extract_json_object(raw_response)
+    if parsed is None:
+        return None, "invalid_json"
+
+    allowed_fields = {"intent", "reply", "topic", "cycle_complete"}
+    if set(parsed) - allowed_fields:
+        return None, "unexpected_fields"
+
+    intent = parsed.get("intent")
+    if not isinstance(intent, str) or intent not in CONVERSATION_INTENTS:
+        return None, "invalid_intent"
+
+    raw_reply = parsed.get("reply")
+    reply = _clean_spoken_reply(raw_reply)
+    if raw_reply is not None and reply is None:
+        return None, "invalid_reply"
+    if intent in {"CONTINUE", "TOPIC_CHANGE", "UNCLEAR"} and reply is None:
+        return None, "missing_reply"
+    if reply is not None and _solicits_visitor_name(reply):
+        return None, "repeated_name_solicitation"
+
+    raw_topic = parsed.get("topic")
+    topic = _clean_topic(raw_topic)
+    if raw_topic is not None and topic is None:
+        return None, "invalid_topic"
+    if intent == "TOPIC_CHANGE" and topic is None:
+        return None, "missing_topic"
+
+    cycle_complete = parsed.get("cycle_complete", False)
+    if not isinstance(cycle_complete, bool):
+        return None, "invalid_cycle_complete"
+
+    if intent == "URGENT" and reply is None:
+        reply = prompts.URGENT_FALLBACK
+    return {
+        "intent": intent,
+        "reply": reply,
+        "topic": topic,
+        "cycle_complete": cycle_complete,
+    }, None
+
+
+def _solicits_visitor_name(reply: str) -> bool:
+    """Reject a second name request after the dedicated name phase."""
+    normalized = normalize_for_matching(reply)
+    return any(
+        phrase in normalized
+        for phrase in (
+            "wat is uw naam",
+            "hoe heet u",
+            "hoe mag ik u noemen",
+            "uw naam vertellen",
+            "uw naam delen",
+            "naam met mij delen",
+        )
+    )
+
+
 def _contains_spoken_question(reply: str) -> bool:
     """A question counts only when a question is actually spoken."""
     return "?" in reply
@@ -316,6 +380,16 @@ class ConversationEngine:
         self._shutdown = True
         return self._turn((), ())
 
+    def reset_to_standby(self) -> ConversationTurn:
+        """Forget the current visitor without stopping the long-running engine."""
+        self._clear_visitor_session()
+        self._state["phase"] = "STANDBY"
+        self._entry_pending = False
+        return self._turn(
+            (),
+            ("[OPERATOR] Session reset", "[PHASE] STANDBY"),
+        )
+
     def _turn(self, utterances: Any, diagnostics: Any) -> ConversationTurn:
         return ConversationTurn(
             utterances=tuple(utterances),
@@ -431,6 +505,8 @@ class ConversationEngine:
         self._state["current_topic"] = None
         self._state["conversation_context"] = None
         self._state["pending_stop_confirmation"] = None
+        self._state["pending_clarification"] = None
+        self._state["pending_name_confirmation"] = None
         self._state["pending_initial_message"] = None
         self._state["session_turn_count"] = 0
         self._state["invitation_attempts"] = 0
@@ -543,6 +619,30 @@ class ConversationEngine:
             self._begin_goodbye("decline", diagnostics)
             return
 
+        pending_name = self._state.get("pending_name_confirmation")
+        if pending_name:
+            binary = classify_simple_binary_response(visitor_text)
+            if binary == "YES":
+                self._state["visitor_name"] = pending_name
+                self._state["pending_name_confirmation"] = None
+                diagnostics.append("[NAME] CONFIRMED")
+                acknowledgement_template = choose_nonrepeating_response(
+                    self._state,
+                    "last_name_acknowledgement",
+                    prompts.NAME_ACKNOWLEDGEMENTS,
+                )
+                utterances.append(acknowledgement_template.format(name=pending_name))
+                self._finish_name_phase(utterances, diagnostics)
+                return
+            if binary == "NO":
+                self._state["pending_name_confirmation"] = None
+                diagnostics.append("[NAME] NOT_CONFIRMED")
+                utterances.append(prompts.ASK_NAME_WITHOUT_NAME)
+                self._finish_name_phase(utterances, diagnostics)
+                return
+            # A correction such as "Ik heet Semi" is classified normally below.
+            self._state["pending_name_confirmation"] = None
+
         parsed = self._classify_name_response(visitor_text, diagnostics)
         intent = parsed.get("intent") if parsed else "UNCLEAR"
         if intent == "URGENT":
@@ -569,6 +669,16 @@ class ConversationEngine:
                 acknowledgement = acknowledgement_template.format(name=name)
                 utterances.append(acknowledgement)
                 self._finish_name_phase(utterances, diagnostics)
+                return
+
+        if intent == "CONFIRM_NAME":
+            candidate = _clean_name(parsed.get("name"), visitor_text)
+            if candidate:
+                clarification = prompts.NAME_CONFIRMATION.format(name=candidate)
+                self._state["pending_name_confirmation"] = candidate
+                self._state["active_name_question"] = clarification
+                diagnostics.append("[NAME] CONFIRMATION")
+                utterances.append(clarification)
                 return
 
         if intent == "REFUSE":
@@ -619,6 +729,7 @@ class ConversationEngine:
         parsed = _extract_json_object(result)
         if parsed is None or parsed.get("intent") not in {
             "NAME",
+            "CONFIRM_NAME",
             "REFUSE",
             "UNCLEAR",
             "STOP",
@@ -635,6 +746,7 @@ class ConversationEngine:
     ) -> None:
         self._state.pop("ask_name_unclear_count", None)
         self._state.pop("active_name_question", None)
+        self._state["pending_name_confirmation"] = None
         initial_message = self._state.pop("pending_initial_message", None)
         if initial_message:
             self._state["skip_conversation_opening"] = True
@@ -662,6 +774,9 @@ class ConversationEngine:
             self._handle_stop_confirmation(visitor_text, utterances, diagnostics)
             return
 
+        resolving_clarification = (
+            self._state.pop("pending_clarification", None) is not None
+        )
         questions_before = self._state.get("topic_question_count", 0)
         previous_topic = self._state.get("current_topic")
         generated = self._generate_conversation_response(visitor_text, diagnostics)
@@ -689,7 +804,13 @@ class ConversationEngine:
             }
         elif intent == "UNCLEAR":
             diagnostics.append("[INTENT] UNCLEAR")
-            reply = prompts.CONVERSATION_CLARIFICATION
+            # The model may use the immediate context to formulate one careful
+            # interpretation (for example, "Bedoelt u bolognese?"). Keep that
+            # clarification instead of replacing it with a generic repeat
+            # request. It is deliberately tracked outside the topic budget.
+            reply = reply or prompts.CONVERSATION_CLARIFICATION
+            self._state["pending_clarification"] = {"question": reply}
+            cycle_complete = False
         elif intent == "TOPIC_CHANGE":
             diagnostics.append("[INTENT] TOPIC_CHANGE")
         elif intent == "URGENT":
@@ -739,6 +860,7 @@ class ConversationEngine:
             not topic_changed
             and intent == "CONTINUE"
             and self._state.get("pending_stop_confirmation") is None
+            and not resolving_clarification
             and questions_before >= MIN_TOPIC_QUESTIONS
             and not asks_question
             and cycle_complete
@@ -802,32 +924,35 @@ class ConversationEngine:
             diagnostics.append("[LLM] Conversation response unavailable")
             return None
 
-        parsed = _extract_json_object(result)
-        if parsed is None:
-            diagnostics.append("[LLM] Malformed conversation response")
+        validated, reason = _validate_conversation_response(result)
+        if validated is not None:
+            return validated
+
+        # Keep the existing high-level diagnostic for operators while adding a
+        # reason code that contains neither the transcript nor model output.
+        diagnostics.append("[LLM] Malformed conversation response")
+        diagnostics.append(f"[LLM] Conversation validation failed: {reason}")
+        retry_prompt = f"{prompt}\n\n{prompts.CONVERSATION_FORMAT_RETRY}"
+        try:
+            retry_result = self.llm.prompt(
+                retry_prompt,
+                max_tokens=180,
+                temperature=0.0,
+            )
+        except Exception:
+            diagnostics.append("[LLM] Conversation response retry unavailable")
             return None
 
-        intent = parsed.get("intent")
-        reply = _clean_spoken_reply(parsed.get("reply"))
-        topic = _clean_topic(parsed.get("topic"))
-        cycle_complete = parsed.get("cycle_complete", False)
-        if not isinstance(intent, str) or intent not in CONVERSATION_INTENTS:
-            diagnostics.append("[LLM] Malformed conversation response")
+        validated, reason = _validate_conversation_response(retry_result)
+        if validated is None:
+            diagnostics.append("[LLM] Conversation response retry malformed")
+            diagnostics.append(
+                f"[LLM] Conversation retry validation failed: {reason}"
+            )
             return None
-        if intent in {"CONTINUE", "TOPIC_CHANGE"} and reply is None:
-            diagnostics.append("[LLM] Malformed conversation response")
-            return None
-        if intent == "URGENT" and reply is None:
-            reply = prompts.URGENT_FALLBACK
-        if not isinstance(cycle_complete, bool):
-            diagnostics.append("[LLM] Malformed conversation response")
-            return None
-        return {
-            "intent": intent,
-            "reply": reply,
-            "topic": topic,
-            "cycle_complete": cycle_complete,
-        }
+
+        diagnostics.append("[LLM] Conversation response recovered")
+        return validated
 
     def _choose_new_topic(self) -> str:
         current = normalize_for_matching(self._state.get("current_topic") or "")

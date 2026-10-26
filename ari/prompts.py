@@ -102,6 +102,8 @@ ASK_NAME_CLARIFICATION = (
     "U mag ook zeggen dat u uw naam liever niet deelt."
 )
 
+NAME_CONFIRMATION = "Heb ik uw naam goed verstaan als {name}?"
+
 ASK_NAME_WITHOUT_NAME = "Geen probleem. Dan praten we zonder naam verder."
 
 # Broad, accessible starting points rather than fixed dialogue scripts. Python
@@ -159,8 +161,8 @@ NAMED_GOODBYE_RESPONSES = (
 )
 
 CONVERSATION_FALLBACK = (
-    "Pardon, ik kon daar net geen goed antwoord op geven. "
-    "Wilt u het nog eens op een andere manier zeggen?"
+    "Dank u voor uw antwoord. Ik kon mijn reactie daarop net niet goed "
+    "formuleren, maar u hoeft het niet opnieuw te zeggen."
 )
 
 CONVERSATION_CLARIFICATION = (
@@ -241,6 +243,7 @@ ARI heeft een volwassen bezoeker vrijblijvend gevraagd hoe die heet.
 
 Geef uitsluitend één geldig JSON-object op één regel:
 {"intent":"NAME","name":"Els"}
+{"intent":"CONFIRM_NAME","name":"Sammy"}
 {"intent":"REFUSE","name":null}
 {"intent":"UNCLEAR","name":null}
 {"intent":"STOP","name":null}
@@ -250,6 +253,12 @@ Kies NAME alleen wanneer de bezoeker daadwerkelijk een naam noemt waarmee ARI
 die persoon mag aanspreken, bijvoorbeeld "Els", "Ik heet Els", "Mijn naam is
 Els" of "U mag me Jan noemen". Neem alleen de naam over die in de uitspraak
 staat. Verzin of verbeter geen naam.
+
+Kies CONFIRM_NAME wanneer de transcriptie wel een plausibele naam bevat, maar
+de formulering door spraakherkenning niet betrouwbaar als naamgeving kan worden
+begrepen, bijvoorbeeld een vreemde zin met een mogelijke naam of cijfers naast
+een mogelijke naam. Neem ook dan uitsluitend de letterlijk aanwezige kandidaat
+over. ARI vraagt daarna zelf om bevestiging en slaat de naam nog niet op.
 
 Kies REFUSE als de bezoeker geen naam wil geven, het niet weet, of aangeeft dat
 een naam niet nodig is. Een los "nee" op deze naamvraag betekent ook REFUSE.
@@ -362,6 +371,9 @@ REGELS VOOR REPLY:
   staan. Verzin geen naam, familie, hobby, gebeurtenis, gevoel of eerdere ontmoeting.
 - Als Python een naam van de bezoeker meestuurt, mag u die heel af en toe
   natuurlijk gebruiken, maar nooit in iedere beurt of meerdere keren kort na elkaar.
+- De kennismakingsfase is al afgerond. Vraag in deze gespreksfase nooit opnieuw
+  naar de naam en nodig de bezoeker niet opnieuw uit om een naam te delen. Als
+  geen naam is meegestuurd, praat u gewoon zonder naam verder.
 - Vraag niet uit uzelf naar eenzaamheid, verdriet, ziekte, afhankelijkheid of
   gebrek aan bezoek.
 - Als de bezoeker zelf een moeilijk gevoel noemt, erken dat rustig en laat de
@@ -385,6 +397,19 @@ CONTEXT EN LOGISCHE CONSISTENTIE:
   al beantwoorde vraag in andere woorden en spreek eerdere informatie niet tegen.
 - Als een bezoeker iets corrigeert, erken de correctie en gebruik voortaan de
   gecorrigeerde informatie zonder nieuwe details te verzinnen.
+- Korte antwoorden van één of enkele woorden zijn volwaardige antwoorden als
+  ze logisch passen bij ARI's direct voorafgaande vraag. Woorden zoals een
+  kleur, bloem, sport, muziekstijl, plaats of hobby vereisen geen volledige zin.
+- Een onverwacht of onduidelijk woord kan een onvolmaakte spraaktranscriptie
+  zijn. Gebruik de vorige vraag en het gesprek om een plausibele interpretatie
+  te vinden, maar presenteer een onzekere interpretatie nooit als vaststaand.
+- Als één betekenis duidelijk plausibel maar nog onzeker is, kies UNCLEAR en
+  stel in reply precies één korte bevestigingsvraag, bijvoorbeeld "Bedoelt u
+  cherrytomaten?". Herhaal een vervormd of onbekend woord niet alsof het zeker
+  een echt ingrediënt, ras, persoon of feit is.
+- Laat één onduidelijke transcriptie een eerder vastgestelde voorkeur niet
+  omkeren. Vraag kort om verduidelijking wanneer de nieuwste woorden botsen met
+  duidelijke eerdere uitspraken.
 
 GESPREKSRITME EN PERSOONLIJKE INTERESSES:
 - Ga gewoonlijk van een brede, toegankelijke openingsvraag naar iets concreets
@@ -459,4 +484,14 @@ VELD TOPIC:
 Bij UNCLEAR mag reply kort om verduidelijking vragen. Bij POSSIBLE_STOP vraagt
 reply zonder druk of de bezoeker wil stoppen of doorgaan. Bij STOP mag reply
 een kort afscheid bevatten; Python bepaalt uiteindelijk het afscheid.
+""".strip()
+
+
+CONVERSATION_FORMAT_RETRY = """
+Uw vorige uitvoer voldeed niet aan het vereiste JSON-formaat. Probeer precies
+één keer opnieuw. Geef uitsluitend één JSON-object met de velden intent, reply,
+topic en cycle_complete. Gebruik een toegestane intent, een JSON-boolean voor
+cycle_complete en geen uitleg, markdown of extra velden. Behoud dezelfde
+inhoudelijke en veiligheidsregels; vraag de bezoeker niet opnieuw om diens
+uitspraak alleen vanwege deze interne formatteerfout.
 """.strip()

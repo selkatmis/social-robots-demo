@@ -16,7 +16,7 @@ from shared.laptop import LaptopRobot
 from shared.llm import LLM
 
 LANGUAGE = "nl-NL"
-VOICE = "MaartenNeural"
+VOICE = "Harper:MAI-Voice-2.1-Flash"
 HINTS = ["Furhat", "FOAF", "ARI", "QT", "Q-T", "cutie", "Alice", "Nieuwspoort", "VU"]
 END_SPEECH_TIMEOUT = 1.0  
 NEW_VISITOR_AFTER = 3     
@@ -26,7 +26,7 @@ GAZE_Y_OFFSET = -0.18
 
 GREETING = (
     "[HAPPY] Hallo! Ik ben Furhat, de centrale informatie-robot van dit onderzoeksproject. "
-    "Ik vertel u graag over onze sociale robots Ari, Q-T en mijzelf, of over ons wetenschappelijk onderzoek. "
+    "Ik vertel u graag over onze sociale robots Ari, cutie en mijzelf, of over ons wetenschappelijk onderzoek. "
     "Waar wilt u meer over weten?"
 )
 FALLBACK_RETRY = "[CONFUSED] Sorry, ik heb u niet helemaal goed verstaan. Kunt u uw vraag nog eens op een andere manier stellen?"
