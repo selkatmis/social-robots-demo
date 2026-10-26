@@ -1,0 +1,19 @@
+Banks, Edwards, & Westerman (2021) - The Space Between: Nature and Machine Heuristics in Evaluations of Organisms, Cyborgs, and Robots: Deze studie onderzoekt hoe de categorie van een agent beïnvloedt hoe natuurlijk we gedrag waarnemen en hoe we oplossingen evalueren. Organismen worden vaker beoordeeld via een natuurheuristiek, terwijl cyborgs complexe grenzen oproepen.
+
+Barry et al. (2026) - The Use of Social Robots in Primary School to Support Children's Academic and Social Emotional Learning: Een overzicht van dertig onderzoeken naar sociale robots op de basisschool. De focus ligt vooral op schoolse vakken zoals talen en wiskunde, terwijl sociaal-emotioneel leren nog nauwelijks direct gemeten wordt.
+
+Belpaeme et al. (2018) - Social robots for education: A review: Dit artikel toont aan dat fysieke sociale robotdocenten positieve leereffecten behalen die dicht in de buurt komen van menselijke bijles. Hun fysieke aanwezigheid zorgt voor meer betrokkenheid en motivatie dan schermen.
+
+Broadbent (2017) - Interactions With Robots: Deze overzichtsstudie laat zien dat mensen onbewust sociale regels en stereotypen toepassen op robots. Mensen schrijven robots mate van handelingsbekwaamheid toe en kunnen er empathie voor voelen, hoewel onnatuurlijke bewegingen het gevoel van de uncanny valley kunnen triggeren.
+
+Gasteiger, Hellou, & Ahn (2023) - Factors for Personalization and Localization to Optimize Human-Robot Interaction: Een overzicht van factoren om robots te personaliseren en te lokaliseren. Belangrijke aspecten zijn communicatiestijl en directheid, proxemics oftewel persoonlijke afstand, verwachtingen over gedrag, en het ontwerp van de interface per cultuur.
+
+Hellström, Kaiser, & Bensch (2024) - A Taxonomy of Embodiment in the AI Era: Dit artikel presenteert een taxonomie om embodiment te classificeren op basis van agent, mediator, omgeving, mate van lichaam en mate van verwevenheid. Ook worden offline embodiment bij taalmodellen en embodiment by proxy geïntroduceerd.
+
+Konijn & Hoorn (2020) - Use of Communication Robots in Healthcare: Dit artikel bespreekt hoe communicatieve en sociale zorgrobots ouderen helpen bij eenzaamheid en dementie, en hoe robots kinderen met autisme of in het ziekenhuis ondersteunen. Patiënten blijken gemakkelijk een band op te bouwen met dergelijke machines.
+
+Konijn, Preciado Vanegas, & van Minkelen (2025) - Theory of Affective Bonding: Dit artikel introduceert een kader om te verklaren hoe en waarom mensen emotionele banden vormen met sociale robots. Dit is gebaseerd op vier mechanismen, waaronder het toekennen van menselijkheid, het vervullen van behoeften, emotiegedreven realisme en taakgerichte affordances.
+
+Konijn, Smakman, & van den Berghe (2020) - Use of Robots in Education: Een bespreking van sociale robots in het onderwijs. Uit onderzoek blijkt dat leerlingen met leerproblemen of die snel afgeleid zijn, beter presteren met een neutrale robot dan met een sociaal expressieve robot die te veel kan afleiden.
+
+Laban et al. (2024) - Building Long-Term Human-Robot Relationships: Examining Disclosure, Perception and Well-Being Across Time: Een langdurig experiment waarbij deelnemers tien keer over vijf weken met robot Pepper praatten. Mensen bleken over tijd meer open te durven vertellen, vonden de robot socialer en bekwamer, en rapporteerden een verbeterde stemming en minder eenzaamheid.

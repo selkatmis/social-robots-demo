@@ -1,0 +1,9 @@
+Furhat Robot - The Furhat robot is an advanced conversational humanoid head featuring a unique back-projection system that allows it to instantly change faces, expressions, and identities dynamically. It excels at natural, multi-person face-to-face social interaction and research.
+
+
+
+QTrobot - The QTrobot is a friendly desktop humanoid designed primarily as an educational and therapeutic assistant, using expressive animations and gamified curricula to help children, especially those on the autism spectrum, develop social and emotional skills.
+
+
+
+ARI Robot - The ARI robot by PAL Robotics is a full-sized, wheeled social service robot equipped with a chest touchscreen and autonomous navigation, making it ideal for acting as an interactive information kiosk, greeter, or assistant in public and healthcare spaces.
