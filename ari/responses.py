@@ -1402,15 +1402,17 @@ class ConversationEngine:
             diagnostics.append("[GAME] PICTURE_LABELS_UNVERIFIED")
             return
 
-        try:
-            raw = self.llm.prompt(
-                self.difference_game.interpretation_prompt(visitor_text),
-                max_tokens=1800,
-                temperature=0.0,
-            )
-        except Exception:
-            diagnostics.append("[LLM] Difference interpreter unavailable")
-            raw = None
+        raw = self.difference_game.interpret_known_observation(visitor_text)
+        if raw is None:
+            try:
+                raw = self.llm.prompt(
+                    self.difference_game.interpretation_prompt(visitor_text),
+                    max_tokens=1800,
+                    temperature=0.0,
+                )
+            except Exception:
+                diagnostics.append("[LLM] Difference interpreter unavailable")
+                raw = None
         intent = self.difference_game.response_intent(raw)
         if intent == "STOP":
             self._begin_goodbye("conversation", diagnostics)

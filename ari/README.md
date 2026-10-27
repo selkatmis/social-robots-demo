@@ -70,6 +70,18 @@ Python also deduplicates matches and
 owns the score. Multiple verified differences in one utterance count once
 each. A deliberately empty dataset still disables scoring safely.
 
+The game introduction gives a concrete example: "Links zijn er twee bananen
+en rechts drie." This is an example, not a required sentence. A complete
+catalogued observation such as "Er mist een banaan" or "Ik zie ook dat er een
+banaan mist" is recognized locally before calling the LLM. The observed ASR
+variant "Er is een banaan meest" is accepted too. This uses whole observations,
+not banana keywords; negations, wrong counts and reversed sides do not take
+this shortcut. Other wording still uses the semantic interpreter and normal
+validation. Repeated descriptions of the bananas count only once.
+
+These are laptop-side conversation changes: restart `start_ari_demo.ps1`
+after saving them locally; redeploying the ROS sidecar is not needed.
+
 The initial milestone is three unique matches. Continuing raises the total
 target to eight (five more), and continuing again raises it to fifteen (seven
 more). The next target is capped by the available dataset, and progress is

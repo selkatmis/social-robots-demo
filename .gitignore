@@ -27,3 +27,4 @@ dist/
 !/tests/test_ari_operator.py
 !/tests/test_ari_emotes.py
 !/tests/test_robot_hub.py
+!/tests/test_ari_game_observations.py

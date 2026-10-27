@@ -268,7 +268,13 @@ class DifferenceGame:
             "eenvoudige woorden en redelijk herkenbare ASR-fouten. Exacte woorden "
             "zijn niet nodig. Een specifiek verschil zonder beide kanten te "
             "noemen mag kloppen (zoals meer bananen, een ander knopje of een "
-            "andere stand van de klokwijzers). Alleen een object noemen zonder "
+            "andere stand van de klokwijzers). 'Er mist een banaan', "
+            "'er ontbreekt een banaan' en de herkenbare ASR-variant 'er is een "
+            "banaan meest' beschrijven het verschil in aantal bananen. Beide "
+            "kanten noemen of precies twee en drie zeggen is niet verplicht. "
+            "Kopieer voor die observaties het canonieke paar van bananen, "
+            "maar niet bij ontkenning, een verkeerd aantal of een expliciet "
+            "omgekeerde links/rechts-beschrijving. Alleen een object noemen zonder "
             "een verschil te beschrijven is onvoldoende. Kopieer een canoniek "
             "paar alleen wanneer de uitspraak die betekenis ondersteunt. "
             "Een uitdrukkelijk omgekeerde richting blijft omgekeerd in de "
@@ -286,6 +292,41 @@ class DifferenceGame:
             f"REFERENTIES:\n{json.dumps(catalog, ensure_ascii=False)}\n\n"
             f"BEZOEKER:\n{visitor_text}"
         )
+
+    def interpret_known_observation(self, visitor_text: str) -> dict[str, Any] | None:
+        """Resolve a complete, catalogued observation without an LLM call.
+
+        Match the entire observation, never an object keyword or substring:
+        negations, wrong counts and reversed sides must still be interpreted
+        and validated normally. Only harmless 'ik zie (ook) (dat)' prefixes
+        are removed. The returned canonical proposal still goes through the
+        ordinary score/duplicate validator.
+        """
+        def observation_key(text: str) -> str:
+            normalized = _normalize(text)
+            for prefix in ("ik zie ook dat ", "ik zie dat ", "ik zie ook ", "ik zie "):
+                if normalized.startswith(prefix):
+                    return normalized[len(prefix):]
+            return normalized
+
+        key = observation_key(visitor_text)
+        references = [
+            reference for reference in self._references
+            if key and any(
+                key == observation_key(observation)
+                for observation in reference.accepted_observations
+            )
+        ]
+        if len(references) != 1:
+            return None
+        reference = references[0]
+        return {"intent": "ANSWER", "matches": [{
+            "difference_id": reference.difference_id,
+            "feature": reference.feature,
+            "picture_a": reference.picture_a,
+            "picture_b": reference.picture_b,
+            "confidence": 1.0,
+        }]}
 
     def evaluate_llm_output(self, raw_output: Any) -> GameAnswerResult:
         """Parse strict model JSON, then perform authoritative validation."""
