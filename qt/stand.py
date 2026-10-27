@@ -39,7 +39,7 @@ HEAD_PITCH_JOINT_NAME = "HeadPitch"
 # Runtime demo-state integration. A future UI may either call the SetBool
 # service or publish std_msgs/Bool to the command topic. The latched state topic
 # reports the current value. Tracking never stops when this value changes.
-STAND_BUILD_VERSION = "demo-face-grace-12s-v1"
+STAND_BUILD_VERSION = "demo-face-grace-12s-greeting-v2"
 INITIAL_DEMO_ACTIVE = False
 DEMO_SET_SERVICE = "/qt_stand/set_demo_active"
 DEMO_COMMAND_TOPIC = "/qt_stand/demo_active/set"
@@ -112,6 +112,14 @@ SMILE_INTERVAL_SECONDS = (10.0, 20.0)
 SMILE_DURATION_SECONDS = 2.0
 EXPRESSION_SERVICE_WAIT_SECONDS = 5.0
 EXPRESSION_RETRY_SECONDS = 2.0
+
+# One greeting when visitor speech starts a session (Demo OFF -> ON).
+# QT/hi is a greeting gesture name; verify it in this robot's gesture library.
+GREETING_GESTURE_SERVICE = "/qt_robot/gesture/play"
+GREETING_GESTURE_NAME = "QT/hi"
+GREETING_GESTURE_SPEED = 1.0
+GREETING_SERVICE_WAIT_SECONDS = 2.0
+GREETING_HAPPY_SECONDS = 3.0
 
 # Haar face detection. Detection runs below camera rate to leave CPU available
 # for the rest of QT's software.
@@ -197,6 +205,8 @@ class StandControlRequestHandler(BaseHTTPRequestHandler):
                 "ok": True,
                 "demo_active": active,
                 "stand_version": STAND_BUILD_VERSION,
+                "greeting_gesture": GREETING_GESTURE_NAME,
+                "greeting_happy_seconds": GREETING_HAPPY_SECONDS,
                 "standby_face_lost_grace_seconds": FACE_LOST_GRACE_SECONDS,
                 "demo_face_lost_grace_seconds": (
                     FACE_LOST_GRACE_SECONDS
@@ -332,6 +342,8 @@ class QTStand:
         self.next_smile_at = now + random_duration(SMILE_INTERVAL_SECONDS)
 
         self.current_expression = None
+        self.greeting_happy_until = 0.0
+        self.greeting_thread = None
         self.last_expression_attempt_at = float("-inf")
         self.shutdown_complete = False
         self.control_server = None
@@ -770,6 +782,15 @@ class QTStand:
         return sent
 
     def _set_expression(self, expression, now, force=False):
+        if (
+            not force
+            and expression == NEUTRAL_EXPRESSION
+            and now < self.greeting_happy_until
+            and self._get_demo_active()
+        ):
+            # Face-following and no-face handlers must not immediately undo
+            # the visitor's greeting smile.
+            expression = SMILE_EXPRESSION
         if not force and expression == self.current_expression:
             return
         if (
@@ -801,7 +822,50 @@ class QTStand:
         self._cancel_idle_scan(now, restart_interval=True)
         self.smile_ends_at = None
         self.next_smile_at = now + random_duration(SMILE_INTERVAL_SECONDS)
-        self._set_expression(NEUTRAL_EXPRESSION, now)
+        if demo_active:
+            self.greeting_happy_until = now + GREETING_HAPPY_SECONDS
+            self._set_expression(SMILE_EXPRESSION, now, force=True)
+            self._start_greeting_wave()
+        else:
+            self.greeting_happy_until = 0.0
+            self._set_expression(NEUTRAL_EXPRESSION, now)
+
+    def _start_greeting_wave(self):
+        """Keep the blocking native gesture service off the tracking loop."""
+        if self.greeting_thread is not None and self.greeting_thread.is_alive():
+            return
+        self.greeting_thread = threading.Thread(
+            target=self._play_greeting_wave,
+            name="qt-greeting-wave",
+            daemon=True,
+        )
+        self.greeting_thread.start()
+
+    def _play_greeting_wave(self):
+        try:
+            import rosservice
+
+            rospy.wait_for_service(
+                GREETING_GESTURE_SERVICE,
+                timeout=GREETING_SERVICE_WAIT_SECONDS,
+            )
+            # Discover the installed ROS type instead of assuming which QT
+            # package exports gesture_play on this QTPC software version.
+            service_type = rosservice.get_service_class_by_name(GREETING_GESTURE_SERVICE)
+            if service_type is None:
+                raise RuntimeError("Cannot resolve the installed gesture service type")
+            if self.shutdown_complete or not self._get_demo_active():
+                return
+            gesture_client = rospy.ServiceProxy(
+                GREETING_GESTURE_SERVICE, service_type, persistent=False
+            )
+            response = gesture_client(
+                name=GREETING_GESTURE_NAME, speed=GREETING_GESTURE_SPEED
+            )
+            if not response.status:
+                rospy.logwarn("QT rejected greeting gesture: %s", GREETING_GESTURE_NAME)
+        except Exception as error:
+            rospy.logwarn("QT greeting wave unavailable: %s", error)
 
     def _cancel_idle_scan(self, now, restart_interval):
         was_active = bool(self.idle_scan_targets)

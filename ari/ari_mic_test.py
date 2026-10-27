@@ -13,7 +13,7 @@ from difflib import SequenceMatcher
 from typing import Any
 
 from robond.core.listener_backend import ListenerBackend
-from robond.core.robot_interface import Expression
+from robond.core.robot_interface import Expression, Gesture
 from robond.robot.remote import RemoteRobotInterface
 
 from ari import prompts
@@ -192,6 +192,8 @@ class MicrophoneInput:
         self.start_attempts = start_attempts
         self.console_print = console_print
         self._events: queue.Queue[tuple[str, str, bool]] = queue.Queue()
+        self._capture_lock = threading.RLock()
+        self._capture_epoch = 0
         self._announced = False
         self._primed = False
         self._overlap_utterance_ids: set[int] = set()
@@ -233,15 +235,18 @@ class MicrophoneInput:
                 return
 
     def stop(self) -> None:
-        self._primed = False
-        if self.microphone.is_running:
-            self.microphone.stop()
-        self._drain()
+        with self._capture_lock:
+            self._capture_epoch += 1
+            self._primed = False
+            if self.microphone.is_running:
+                self.microphone.stop()
+            self._drain()
 
     def cancel_pending(self) -> None:
         """Stop capture and wake a currently blocked listen() call."""
-        self.stop()
-        self._events.put(("cancel", "", False))
+        with self._capture_lock:
+            self.stop()
+            self._events.put(("cancel", "", False))
 
     def set_robot_speaking(self, speaking: bool) -> None:
         """Expose ARI's speech state to the streaming microphone."""
@@ -335,28 +340,42 @@ class MicrophoneInput:
 
     def prime(self) -> None:
         """Begin capture now and preserve early speech for the next listen()."""
-        self._drain()
-        self._start()
-        self._primed = True
-        self._announce_microphone()
-
-    def listen(self) -> str:
-        # Do not restart or drain a stream primed during ARI's final words: it
-        # may already contain the beginning of the visitor's response.
-        use_primed_capture = self._primed and self.microphone.is_running
-        self._primed = False
-        if not use_primed_capture:
+        with self._capture_lock:
+            self._capture_epoch += 1
             self._drain()
             self._start()
+            self._primed = True
+        self._announce_microphone()
+
+    def listen(self, *, should_continue: Callable[[], bool] | None = None) -> str:
+        # Do not restart or drain a stream primed during ARI's final words: it
+        # may already contain the beginning of the visitor's response.
+        with self._capture_lock:
+            if should_continue is not None and not should_continue():
+                raise ListeningCancelled()
+            use_primed_capture = self._primed and self.microphone.is_running
+            self._primed = False
+            if not use_primed_capture:
+                self._drain()
+                self._start()
+                self._capture_epoch += 1
+            owned_epoch = self._capture_epoch
         self._announce_microphone()
         self.console_print("[LISTENING] Waiting for the visitor...")
 
         try:
             while True:
+                if should_continue is not None and not should_continue():
+                    raise ListeningCancelled()
                 try:
                     kind, value, overlapped = self._events.get(timeout=0.2)
                 except queue.Empty:
                     continue
+                with self._capture_lock:
+                    if self._capture_epoch != owned_epoch:
+                        if kind == "transcript":
+                            self._events.put((kind, value, overlapped))
+                        raise ListeningCancelled()
                 if kind == "error":
                     raise ContinuousMicError(value)
                 if kind == "cancel":
@@ -364,12 +383,19 @@ class MicrophoneInput:
 
                 # Stop capture and discard stale audio before ARI generates or
                 # speaks a response, preventing ARI from transcribing itself.
-                self.stop()
+                self._stop_if_owned(owned_epoch)
                 self.last_transcript_overlapped = overlapped
                 return value
         except BaseException:
-            self.stop()
+            self._stop_if_owned(owned_epoch)
             raise
+
+    def _stop_if_owned(self, epoch: int) -> None:
+        # A cancelled listener must not tear down a newer pre-listen stream
+        # started by the operator's final question.
+        with self._capture_lock:
+            if epoch == self._capture_epoch:
+                self.stop()
 
     def close(self) -> None:
         self.stop()
@@ -422,14 +448,23 @@ def _say_and_measure(
     utterance: str,
     timing: SpeechDurationEstimator,
     console_print: Callable[..., None],
+    *,
+    greeting_wave: bool = False,
 ) -> None:
     started = time.monotonic()
     try:
-        robot.say(utterance)
+        _speak_text(robot, utterance, greeting_wave=greeting_wave)
     except Exception as error:
         console_print(f"[ARI SPEECH ERROR] {error}")
     finally:
         timing.observe(utterance, time.monotonic() - started)
+
+
+def _speak_text(robot: Any, utterance: str, *, greeting_wave: bool = False) -> None:
+    if greeting_wave and callable(getattr(robot, "coordinated_action", None)):
+        robot.coordinated_action(utterance, gesture=Gesture.WAVE)
+    else:
+        robot.say(utterance)
 
 
 def _say_with_prelisten(
@@ -439,6 +474,8 @@ def _say_with_prelisten(
     timing: SpeechDurationEstimator,
     console_print: Callable[..., None],
     should_continue: Callable[[], bool],
+    *,
+    greeting_wave: bool = False,
 ) -> None:
     """Speak asynchronously and prime the mic near the predicted ending."""
     completed = threading.Event()
@@ -447,7 +484,7 @@ def _say_with_prelisten(
 
     def run_speech() -> None:
         try:
-            robot.say(utterance)
+            _speak_text(robot, utterance, greeting_wave=greeting_wave)
         except Exception as error:
             speech_errors.append(error)
         finally:
@@ -536,10 +573,14 @@ def speak_turn(
                     timing,
                     console_print,
                     should_continue,
+                    greeting_wave=turn.greeting_wave and index == 0,
                 )
             else:
                 console_print("[SPEAKING] ARI is speaking; microphone is stopped.")
-                _say_and_measure(robot, utterance, timing, console_print)
+                _say_and_measure(
+                    robot, utterance, timing, console_print,
+                    greeting_wave=turn.greeting_wave and index == 0,
+                )
         finally:
             # Timestamp the memory at playback completion so even a longer ARI
             # utterance remains available while its final audio is transcribed.
@@ -553,6 +594,53 @@ def speak_turn(
             time.sleep(cooldown_seconds)
     for diagnostic in post_speech:
         console_print(diagnostic)
+
+
+def run_conversation(runtime: RuntimeCoordinator, microphone_input: MicrophoneInput) -> None:
+    """Deliver each pending response only in the generation that created it."""
+    turn = runtime.start_engine()
+    pending_generation = runtime.generation
+    while not runtime.engine.is_done:
+        if runtime.wait_for_actions(pending_generation):
+            runtime.deliver_turn(turn, pending_generation)
+        if not runtime.is_current(pending_generation):
+            turn = ConversationTurn(())
+            pending_generation = runtime.generation
+            continue
+
+        listen_generation = runtime.generation
+        if not runtime.wait_for_actions(listen_generation):
+            turn = ConversationTurn(())
+            pending_generation = runtime.generation
+            continue
+        runtime.begin_listening()
+        listening_cancelled = False
+        while runtime.is_current(listen_generation):
+            if not runtime.wait_for_actions(listen_generation):
+                listening_cancelled = True
+                break
+            try:
+                transcript = microphone_input.listen(
+                    should_continue=lambda: runtime.can_listen(listen_generation)
+                )
+            except ListeningCancelled:
+                listening_cancelled = True
+                break
+            if microphone_input.is_probable_robot_echo(transcript):
+                print("[MIC] ARI's own speech was ignored; listening continues.")
+                runtime.begin_listening()
+                continue
+            print(f"Bezoeker: {transcript}")
+            break
+        else:
+            listening_cancelled = True
+        if listening_cancelled:
+            turn = ConversationTurn(())
+            pending_generation = runtime.generation
+            continue
+        next_turn = runtime.handle_transcript(transcript, listen_generation)
+        turn = next_turn if next_turn is not None else ConversationTurn(())
+        pending_generation = listen_generation if next_turn is not None else runtime.generation
 
 
 def main(args: argparse.Namespace | None = None) -> int:
@@ -593,7 +681,10 @@ def main(args: argparse.Namespace | None = None) -> int:
     runtime: RuntimeCoordinator | None = None
     ui_server: LocalOperatorServer | None = None
     try:
-        engine = ConversationEngine(LLM(system_prompt=prompts.SYSTEM_PROMPT))
+        engine = ConversationEngine(
+            LLM(system_prompt=prompts.SYSTEM_PROMPT),
+            activities_enabled=True,
+        )
 
         def expression_fallback(name: str) -> None:
             robot.set_expression(Expression(name))
@@ -611,6 +702,8 @@ def main(args: argparse.Namespace | None = None) -> int:
             robot,
             microphone_input,
             social_control,
+            turn_speaker=speak_turn,
+            speech_timing=speech_timing,
         )
         if getattr(args, "ui", False):
             ui_server = LocalOperatorServer(
@@ -625,50 +718,7 @@ def main(args: argparse.Namespace | None = None) -> int:
                 f"{getattr(args, 'ui_port', UI_PORT)}"
             )
 
-        turn = runtime.start_engine()
-        while not engine.is_done:
-            turn_generation = runtime.generation
-            if runtime.prepare_turn(turn, turn_generation):
-                speak_turn(
-                    turn,
-                    robot,
-                    microphone_input,
-                    speech_timing,
-                    should_continue=lambda: runtime.is_current(turn_generation),
-                    on_speech_start=lambda utterance: runtime.begin_speaking(
-                        utterance, turn_generation
-                    ),
-                    on_speech_end=lambda: runtime.end_speaking(turn_generation),
-                )
-                runtime.finish_turn(turn_generation)
-            if not runtime.is_current(turn_generation):
-                turn = ConversationTurn(())
-                continue
-
-            listen_generation = runtime.generation
-            runtime.begin_listening()
-            listening_cancelled = False
-            while runtime.is_current(listen_generation):
-                try:
-                    transcript = microphone_input.listen()
-                except ListeningCancelled:
-                    listening_cancelled = True
-                    break
-                if microphone_input.is_probable_robot_echo(transcript):
-                    print("[MIC] ARI's own speech was ignored; listening continues.")
-                    runtime.begin_listening()
-                    continue
-                print(f"Bezoeker: {transcript}")
-                break
-            else:
-                turn = ConversationTurn(())
-                continue
-            if listening_cancelled:
-                turn = ConversationTurn(())
-                continue
-            turn = runtime.handle_transcript(transcript, listen_generation)
-            if turn is None:
-                turn = ConversationTurn(())
+        run_conversation(runtime, microphone_input)
     except KeyboardInterrupt:
         print("\n[Demo stopped]")
     except ContinuousMicError as error:

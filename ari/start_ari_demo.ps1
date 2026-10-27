@@ -31,7 +31,7 @@ $RemoteVenv = "/home/pal/robond-venv"
 $RemoteSidecar = "/home/pal/ari_social_proxy.py"
 $RemoteRoboBondLog = "/tmp/ari-robond-proxy.log"
 $RemoteSidecarLog = "/tmp/ari-social-proxy.log"
-$ExpectedSidecarVersion = "ari-social-v0.3.4-brief-face-smile"
+$ExpectedSidecarVersion = "ari-social-v0.4.1-operator-emotes"
 
 $SshConnectTimeoutSeconds = 10
 $StartupTimeoutSeconds = 45
@@ -284,6 +284,13 @@ fi
         "[ARI READY] $($SidecarHealth.sidecar_version); movement available; " +
         "neck_enabled=$($SidecarHealth.neck_enabled)."
     ) -ForegroundColor Green
+    if ($SidecarHealth.tablet_available -ne $true) {
+        Write-Warning (
+            "ARI tablet navigation is safely disabled because the internal " +
+            "Main/Zoek_de_verschillen page URIs have not been verified and " +
+            "configured. BABBEL remains available; see ari\README.md."
+        )
+    }
     Write-Host "[ARI READY] Operator UI: http://127.0.0.1:${UiPort}"
 
     Write-Step "Starting the Windows microphone demo"

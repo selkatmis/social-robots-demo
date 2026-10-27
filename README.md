@@ -105,3 +105,47 @@ No robot nearby? Only `MISTRAL_API_KEY` is needed for these:
 python -m furhat.furhat --mic    # talk with your laptop's microphone; the reply is spoken (macOS)
 python -m furhat.furhat --text   # type instead of talking
 ``` The persona and rules are in `SYSTEM_PROMPT` at the top of `furhat/furhat.py`.
+
+## 3. Robot hub: laptop and iPad control
+
+From this repository on the Windows laptop, start the hub with:
+
+```powershell
+.\venv\Scripts\python.exe -m hub
+```
+
+Alternatively, double-click `start_hub.bat`. The hub prints the laptop's LAN
+address, for example `http://192.168.1.20:8080`. Open it on an iPad on the same
+Wi-Fi, or use `http://127.0.0.1:8080` on the laptop. Safari's **Add to Home
+Screen** can keep it available as a full-screen operator page. Allow the
+laptop's Python through the firewall on the intended private network if needed.
+The hub has no login; access is for operators on that trusted network.
+
+Each robot has Start, Stop, status and a bounded log. The Windows commands are
+the existing `ari/start_ari_demo.ps1`, `qt/start_qt_demo.ps1` and
+`python -m furhat.furhat_test`. The hub adds no conversation engine and does
+not share visitor memory between robots. ARI's microphone remains on the
+laptop. Its existing local interface remains on port `8765`.
+
+The ARI panel shows the transcript, phase and difference-game progress, plus
+typed speech, preset phrases, greeting, faces, gestures, emotes, volume,
+press-and-hold movement, STOP and return to standby. Deploy the new ARI
+sidecar once before first use:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\ari\ari_save_social.ps1
+.\venv\Scripts\python.exe -m hub
+```
+
+Starting the hub itself does not deploy files or start any robot. A sidecar
+update can also be requested explicitly from ARI's card after a version error.
+See [the ARI operator/emote instructions](ari/README.md) for details and the
+robot-side checks that still require physical testing.
+
+Stop a robot using its card. The hub first requests the normal Ctrl+C shutdown
+and waits up to 45 seconds. A second Stop requests forced termination. Forced
+stops and failures appear in the card and log. Ctrl+C in the hub window stops
+all processes it started. Per-robot Windows jobs also clean up local helper
+processes after a launcher exits. Abrupt window closure or forced termination
+can skip the scripts' remote cleanup: check ARI/QTPC services afterwards.
+An ARI demo started separately is shown as external; stop it in its own window.

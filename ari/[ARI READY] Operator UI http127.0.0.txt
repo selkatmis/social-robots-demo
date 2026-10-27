@@ -1,0 +1,187 @@
+[ARI READY] Operator UI: http://127.0.0.1:8765
+
+[ARI START] Starting the Windows microphone demo
+Connecting to ARI at 10.96.21.217:7342...
+ARI connected.
+[ARI UI] Open http://127.0.0.1:8765
+[TABLET] Main
+C:\Users\selka\Documents\Robot_Interaction\social-robots-demo\venv\Lib\site-packages\torch\jit\_serialization.py:176: FutureWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
+  warnings.warn(
+Microphone: Krisp Microphone (Krisp Audio) (device 3)
+[LISTENING] Waiting for the visitor...
+[LISTENING] Waiting for the visitor...
+Bezoeker: Hallo?
+[STANDBY] Greeting recognized
+[PHASE] INTRODUCTION
+[PHASE] ASK_NAME
+ARI: Hallo, ik ben ARI. Als sociale robot bied ik in een woonzorgcentrum gezelschap met een praatje of een eenvoudige activiteit.
+[SPEAKING] ARI is speaking; microphone is stopped.
+ARI: Welke naam mag ik gebruiken?
+[LISTENING] Started listening.
+[LISTENING] Waiting for the visitor...
+Bezoeker: Ik heet Johannes.
+[NAME] NAME
+[PHASE] DAILY_CHECKIN
+ARI: Aangenaam, Johannes.
+[SPEAKING] ARI is speaking; microphone is stopped.
+ARI: Hoe gaat het vandaag met u?
+[LISTENING] Started listening.
+[LISTENING] Waiting for the visitor...
+Bezoeker: Hij gaat best wel goed met mij vandaag.
+ARI: Dat is goed om te horen.
+[SPEAKING] ARI is speaking; microphone is stopped.
+ARI: Gaat u vandaag nog iets doen?
+[LISTENING] Started listening.
+[LISTENING] Waiting for the visitor...
+Bezoeker: Goedavond eten eten.
+[PHASE] ACTIVITY_CHOICE
+ARI: Dat klinkt lekkers.
+[SPEAKING] ARI is speaking; microphone is stopped.
+ARI: Zullen we gezellig babbelen, of wilt u zoek de verschillen spelen?
+[LISTENING] Started listening.
+[LISTENING] Waiting for the visitor...
+Bezoeker: Kunnen we bouwelen, want zoek het verschil heb ik nog niet af.
+[ACTIVITY] GAME
+[PHASE] ZOEK_DE_VERSCHILLEN
+[PHASE] ACTIVITY_CHOICE
+ARI: Zoek de verschillen is nog niet klaar, omdat de gecontroleerde verschillen nog niet zijn toegevoegd. We kunnen wel gezellig babbelen.
+[SPEAKING] ARI is speaking; microphone is stopped.
+ARI: Zullen we in plaats daarvan een praatje maken, of wilt u afronden?
+[LISTENING] Started listening.
+[LISTENING] Waiting for the visitor...
+Bezoeker: Een prachtig meek.
+[LLM] Malformed activity response
+[ACTIVITY] UNCLEAR
+ARI: Wilt u gezellig babbelen of zoek de verschillen spelen?
+[LISTENING] Started listening.
+[LISTENING] Waiting for the visitor...
+Bezoeker: Gezellig babbelen.
+[ACTIVITY] BABBEL
+[PHASE] GEZELLIG_BABBELEN
+[TOPIC] natuur en seizoenen
+ARI: Graag, dan gaan we gezellig babbelen.
+[SPEAKING] ARI is speaking; microphone is stopped.
+ARI: De natuur is nu in volle herfstsfeer. Wat vindt u het mooist aan deze tijd van het jaar?
+[LISTENING] Started listening.
+[LISTENING] Waiting for the visitor...
+Bezoeker: Ja, ik kan niet wachten om kastoonjes te eten.
+ARI: Kastoenjes zijn een lekkere herfstbehandeling. Ga je ze zelf plukken of koop je ze liever bij de groenteboer?
+[LISTENING] Started listening.
+[LISTENING] Waiting for the visitor...
+Bezoeker: Ik koop het gewoon bij de Albertijn.
+ARI: Dat is handig. Waarom vindt u kastoenjes zo lekker?
+[LISTENING] Started listening.
+[LISTENING] Waiting for the visitor...
+Bezoeker: Het smaakt gewoon lekker.
+[PHASE] ACTIVITY_CHOICE
+ARI: Dat is een duidelijke reden. Kastoenjes hebben een kenmerkende smaak.
+[SPEAKING] ARI is speaking; microphone is stopped.
+ARI: Wilt u verder babbelen, zoek de verschillen spelen, of wilt u stoppen?
+[LISTENING] Started listening.
+[LISTENING] Waiting for the visitor...
+Bezoeker: Ja, laten we stoppen.
+[INTENT] STOP
+[PHASE] GOODBYE
+ARI: Bedankt voor ons gesprek, Johannes. Tot een volgende keer!
+[SPEAKING] ARI is speaking; microphone is stopped.
+[PHASE] STANDBY
+[LISTENING] Waiting for the visitor...
+Bezoeker: Ja, ik heb aardig lief. Nee, precies. En de test is morgen op voor de vergeten aardig lief.
+[LISTENING] Waiting for the visitor...
+Bezoeker: Hallo Ari.
+[STANDBY] Greeting recognized
+[PHASE] INTRODUCTION
+[PHASE] ASK_NAME
+ARI: Goedendag! Ik ben ARI, een sociale robot voor gezelschap in een woonzorgcentrum. U kunt met mij praten of samen een activiteit doen.
+[SPEAKING] ARI is speaking; microphone is stopped.
+ARI: Als u wilt: hoe heet u?
+[LISTENING] Started listening.
+[LISTENING] Waiting for the visitor...
+Bezoeker: Oh.
+[NAME] UNCLEAR
+ARI: Sorry, volgens mij heb ik u niet goed begrepen. Wat is uw naam? U mag ook zeggen dat u uw naam liever niet deelt.
+[LISTENING] Started listening.
+[LISTENING] Waiting for the visitor...
+Bezoeker: Nee, ik ben ropjette.
+[NAME] REFUSE
+[PHASE] DAILY_CHECKIN
+ARI: Dat is helemaal prima.
+[SPEAKING] ARI is speaking; microphone is stopped.
+ARI: Hoe is het vandaag met u?
+[LISTENING] Started listening.
+[LISTENING] Waiting for the visitor...
+Bezoeker: Goed.
+ARI: Dat is goed om te horen.
+[SPEAKING] ARI is speaking; microphone is stopped.
+ARI: Heeft u nog plannen voor vandaag?
+[LISTENING] Started listening.
+[LISTENING] Waiting for the visitor...
+Bezoeker: Ja, we gaan de onderwijsbegroting bespreken.
+[PHASE] ACTIVITY_CHOICE
+ARI: Dat klinkt interessant.
+[SPEAKING] ARI is speaking; microphone is stopped.
+ARI: Heeft u zin in een praatje, of zullen we samen zoek de verschillen doen?
+[LISTENING] Started listening.
+[LISTENING] Waiting for the visitor...
+Bezoeker: Praatje.
+[ACTIVITY] BABBEL
+[PHASE] GEZELLIG_BABBELEN
+[TOPIC] mensen met wie iemand graag tijd doorbrengt
+ARI: Graag, dan gaan we gezellig babbelen.
+[SPEAKING] ARI is speaking; microphone is stopped.
+ARI: Waar brengt u graag tijd door met mensen die u leuk vindt?
+[LISTENING] Started listening.
+[LISTENING] Waiting for the visitor...
+Bezoeker: In The Groove
+ARI: Dat is een mooie plek om samen te zijn. Wat maakt die locatie zo aantrekkelijk voor u?
+[LISTENING] Started listening.
+[LISTENING] Waiting for the visitor...
+Bezoeker: Het is altijd heel gezellig en ze hebben lekkere koffie.
+[LLM] Malformed conversation response
+[LLM] Conversation validation failed: invalid_intent
+[LLM] Conversation response recovered
+ARI: Dat klinkt als een perfecte combinatie. Gaan u vaak met dezelfde mensen naar The Groove?
+[LISTENING] Started listening.
+[LISTENING] Waiting for the visitor...
+Bezoeker: Open.
+[PHASE] ACTIVITY_CHOICE
+ARI: Het is fijn dat u regelmatig met dezelfde mensen kunt genieten van een gezellige sfeer en een lekker kopje koffie.
+[SPEAKING] ARI is speaking; microphone is stopped.
+ARI: Wilt u nog even babbelen, zoek de verschillen spelen, of wilt u afronden?
+[LISTENING] Started listening.
+[LISTENING] Waiting for the visitor...
+Bezoeker: Ik wil afronden graag. En ik wil een hand geven.
+[LLM] Malformed activity response
+[ACTIVITY] UNCLEAR
+ARI: Wilt u gezellig babbelen of zoek de verschillen spelen?
+[LISTENING] Started listening.
+[LISTENING] Waiting for the visitor...
+Bezoeker: En Semi, kan dit uit?
+[ACTIVITY] BABBEL
+[PHASE] GEZELLIG_BABBELEN
+[TOPIC] mensen met wie iemand graag tijd doorbrengt
+ARI: Graag, dan gaan we gezellig babbelen.
+[SPEAKING] ARI is speaking; microphone is stopped.
+ARI: Welke mensen brengt u het liefst tijd door in een gezellige omgeving als The Groove?
+[LISTENING] Started listening.
+[LISTENING] Waiting for the visitor...
+Bezoeker: We gaan afsluiten.
+[INTENT] STOP
+[PHASE] GOODBYE
+ARI: Dat is goed. Het was fijn om met u te praten. Een prettige dag!
+[SPEAKING] ARI is speaking; microphone is stopped.
+[PHASE] STANDBY
+[LISTENING] Waiting for the visitor...
+
+[Demo stopped]
+Stopped. Local microphone resources have been released.
+
+[ARI STOP] Beginning graceful shutdown...
+[ARI STOP] 1/2 Stopping ROS social sidecar...
+Stopping ari_social_proxy.py with SIGINT...
+ari_social_proxy.py is stopped.
+[ARI STOP] 2/2 Stopping RoboBOND proxy...
+Stopping ari_proxy with SIGINT...
+ari_proxy is stopped.
+[ARI STOP] Shutdown sequence complete.
+(venv) PS C:\Users\selka\Documents\Robot_Interaction\social-robots-demo> 

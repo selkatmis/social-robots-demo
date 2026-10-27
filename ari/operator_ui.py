@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import threading
+import math
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 from flask import Flask, Response, jsonify, request
 from werkzeug.serving import BaseWSGIServer, WSGIRequestHandler, make_server
 
 from ari.responses import ConversationEngine, ConversationTurn
+from ari.emotes import ActionRunner, EXPRESSIONS, GESTURES, load_emotes, parse_emote
 
 
 UI_HOST = "127.0.0.1"
@@ -33,6 +36,9 @@ class RuntimeCoordinator:
         robot: Any,
         microphone_input: Any,
         social_control: Any,
+        *,
+        turn_speaker: Callable[..., None] | None = None,
+        speech_timing: Any = None,
     ) -> None:
         self.engine = engine
         self.robot = robot
@@ -40,11 +46,20 @@ class RuntimeCoordinator:
         self.social_control = social_control
         self._engine_lock = threading.RLock()
         self._state_lock = threading.RLock()
+        self._tablet_lock = threading.RLock()
+        self._speech_lock = threading.RLock()
+        self._operator_gate = threading.Event()
+        self._control_lock = threading.RLock()
+        self._turn_speaker = turn_speaker
+        self._speech_timing = speech_timing
         self._generation = 0
         self._transcript: list[dict[str, str]] = []
         self._phase = "STANDBY"
         self._activity = "LISTENING"
         self._robot_connected = True
+        self._tablet_page_sent: str | None = None
+        self._volume: int | None = None
+        self.actions = ActionRunner(robot, social_control, self.speak)
 
     @property
     def generation(self) -> int:
@@ -66,57 +81,283 @@ class RuntimeCoordinator:
         visitor_text: str,
         generation: int,
     ) -> ConversationTurn | None:
-        if not self.is_current(generation):
-            return None
-        self.add_transcript("Bezoeker", visitor_text)
-        self.set_activity("THINKING")
+        clean = " ".join(str(visitor_text).split())
+        with self._state_lock:
+            if generation != self._generation:
+                return None
+            if clean:
+                self._transcript.append({"speaker": "Bezoeker", "text": clean})
+                self._transcript = self._transcript[-MAX_TRANSCRIPT_ITEMS:]
+            self._activity = "THINKING"
         with self._engine_lock:
             if not self.is_current(generation):
                 return None
             turn = self.engine.handle_input(visitor_text)
+            turn = self._apply_tablet_request(turn, generation)
         if not self.is_current(generation):
             return None
-        self._phase_for_turn(turn)
+        self._phase_for_turn(turn, generation)
         return turn
 
     def prepare_turn(self, turn: ConversationTurn, generation: int) -> bool:
         if not self.is_current(generation):
             return False
+        with self._engine_lock:
+            turn_after_tablet = self._apply_tablet_request(turn, generation)
+        # A game-page failure is normally resolved in handle_transcript before
+        # this method.  The initial silent Main request cannot replace speech.
+        if turn_after_tablet is not turn and turn.utterances:
+            return False
         farewell = "[PHASE] GOODBYE" in turn.diagnostics
-        active = self.engine.state["phase"] != "STANDBY" or farewell
+        active = self.engine.state["phase"] != "STANDBY" or farewell or bool(
+            turn.utterances and self.actions.busy()
+        )
         self.social_control.set_conversation_active(active)
-        self._phase_for_turn(turn)
+        if not self.is_current(generation):
+            self.social_control.set_conversation_active(False)
+            return False
+        self._phase_for_turn(turn, generation)
         return True
 
+    def _apply_tablet_request(
+        self,
+        turn: ConversationTurn,
+        generation: int,
+    ) -> ConversationTurn:
+        page = turn.tablet_page
+        if not page or page == self._tablet_page_sent:
+            return turn
+        with self._tablet_lock:
+            if not self.is_current(generation):
+                return turn
+            setter = getattr(self.social_control, "set_tablet_page", None)
+            success = bool(setter and setter(page))
+            if not self.is_current(generation):
+                return turn
+            if success:
+                self._tablet_page_sent = page
+                return turn
+            if page == "Zoek_de_verschillen":
+                fallback = self.engine.handle_tablet_navigation_failure()
+                if turn.greeting_wave and turn.utterances:
+                    fallback = replace(
+                        fallback,
+                        utterances=(turn.utterances[0],) + fallback.utterances,
+                        greeting_wave=True,
+                    )
+                # The fallback requests Main.  Try it once, but its failure is
+                # non-fatal because no game is allowed to continue.
+                if fallback.tablet_page == "Main" and setter is not None:
+                    if bool(setter("Main")):
+                        self._tablet_page_sent = "Main"
+                return fallback
+            return turn
+
     def finish_turn(self, generation: int) -> None:
-        if not self.is_current(generation):
-            return
-        phase = self.engine.state["phase"]
-        self._set_phase(phase)
+        with self._state_lock:
+            if generation != self._generation:
+                return
+            phase = self.engine.state["phase"]
+            self._phase = phase
         if phase == "STANDBY":
             self.social_control.set_conversation_active(False)
 
     def begin_speaking(self, utterance: str, generation: int) -> bool:
-        if not self.is_current(generation):
-            return False
-        self.add_transcript("ARI", utterance)
-        self.set_activity("SPEAKING")
-        self.social_control.set_speaking(True)
-        return True
+        with self._control_lock:
+            with self._state_lock:
+                if generation != self._generation:
+                    return False
+                self.add_transcript("ARI", utterance)
+                self._activity = "SPEAKING"
+            self.social_control.set_speaking(True)
+            if not self.is_current(generation):
+                self.social_control.set_speaking(False)
+                return False
+            return True
 
     def end_speaking(self, generation: int) -> None:
-        self.social_control.set_speaking(False)
+        with self._control_lock:
+            self.social_control.set_speaking(False)
         if self.is_current(generation):
             self.set_activity("LISTENING")
 
     def begin_listening(self) -> None:
         self.set_activity("LISTENING")
 
-    def _phase_for_turn(self, turn: ConversationTurn) -> None:
-        if "[PHASE] GOODBYE" in turn.diagnostics and turn.utterances:
-            self._set_phase("GOODBYE")
-        else:
-            self._set_phase(self.engine.state["phase"])
+    def wait_for_actions(self, generation: int) -> bool:
+        while self.is_current(generation) and self._operator_gate.is_set():
+            self.actions.wait(0.1)
+        return self.is_current(generation)
+
+    def can_listen(self, generation: int) -> bool:
+        return self.is_current(generation) and not self._operator_gate.is_set()
+
+    def deliver_turn(
+        self, turn: ConversationTurn, generation: int,
+        *, should_continue: Callable[[], bool] | None = None,
+    ) -> bool:
+        allowed = lambda: self.is_current(generation) and (
+            should_continue is None or should_continue()
+        )
+        while not self._speech_lock.acquire(timeout=0.1):
+            if not allowed():
+                return False
+        try:
+            if not allowed() or not self.prepare_turn(turn, generation):
+                return False
+            if self._turn_speaker is not None:
+                self._turn_speaker(
+                    turn, self.robot, self.microphone_input, self._speech_timing,
+                    should_continue=allowed,
+                    on_speech_start=lambda text: self.begin_speaking(text, generation),
+                    on_speech_end=lambda: self.end_speaking(generation),
+                )
+            else:
+                # Hardware-free integrations can use the runtime without the
+                # microphone adapter. The real adapter supplies speak_turn.
+                for index, text in enumerate(turn.utterances):
+                    if not allowed() or not self.begin_speaking(text, generation):
+                        break
+                    try:
+                        if index == 0 and turn.greeting_wave and hasattr(self.robot, "coordinated_action"):
+                            self.robot.coordinated_action(text, gesture=GESTURES["wave"])
+                        else:
+                            self.robot.say(text)
+                    finally:
+                        self.end_speaking(generation)
+            self.finish_turn(generation)
+            return allowed()
+        finally:
+            self._speech_lock.release()
+
+    def speak(self, text: str, *, should_continue: Callable[[], bool] | None = None) -> None:
+        generation = self.generation
+        self.deliver_turn(ConversationTurn((text,)), generation, should_continue=should_continue)
+
+    def _start_operator(self, name: str, target: Callable[[int, threading.Event], None]) -> bool:
+        with self._state_lock:
+            generation = self._generation
+            if self._operator_gate.is_set() or self.actions.busy():
+                return False
+            self._operator_gate.set()
+        ready = threading.Event()
+        def run(stopped: threading.Event) -> None:
+            ready.wait()
+            try:
+                if self.is_current(generation) and not stopped.is_set():
+                    target(generation, stopped)
+            finally:
+                self._operator_gate.clear()
+        started = self.actions.start(name, run)
+        if not started:
+            self._operator_gate.clear()
+            return False
+        try:
+            cancel = getattr(self.microphone_input, "cancel_pending", None)
+            if cancel is not None:
+                cancel()
+        finally:
+            ready.set()
+        return True
+
+    def operator_say(self, text: str) -> bool:
+        clean = " ".join(text.split())
+        if not clean or len(clean) > 400:
+            return False
+        return self._start_operator(
+            "Spreken", lambda generation, cancel: self.deliver_turn(
+                ConversationTurn((clean,)), generation, should_continue=lambda: not cancel.is_set()
+            ),
+        )
+
+    def greet(self) -> bool:
+        if self.engine.state.get("phase") != "STANDBY":
+            return False
+        def run(generation: int, cancel: threading.Event) -> None:
+            with self._engine_lock:
+                if not self.is_current(generation) or cancel.is_set() or self.engine.state.get("phase") != "STANDBY":
+                    return
+                turn = self.engine.handle_input("Hallo ARI")
+            self.deliver_turn(turn, generation, should_continue=lambda: not cancel.is_set())
+        return self._start_operator("Begroeten", run)
+
+    def show_expression(self, name: str) -> bool:
+        if name not in EXPRESSIONS:
+            return False
+        setter = getattr(self.social_control, "set_expression", None)
+        generation = self.generation
+        with self._control_lock:
+            return bool(self.is_current(generation) and setter and setter(name, 8.0))
+
+    def play_gesture(self, name: str) -> bool:
+        gesture = GESTURES.get(name)
+        if gesture is None:
+            return False
+        def run(_generation: int, cancel: threading.Event) -> None:
+            available = self.robot.get_available_gestures()
+            if gesture in available and not cancel.is_set():
+                self.robot.play_gesture(gesture)
+            elif not cancel.is_set():
+                raise RuntimeError("Dit gebaar is niet beschikbaar op de robot.")
+        return self._start_operator(name, run)
+
+    def play_emote(self, name: str | None = None, script: str | None = None) -> tuple[bool, str | None]:
+        try:
+            if script is not None:
+                steps = parse_emote(script)
+                name = "Eigen emote"
+            else:
+                emotes = load_emotes()
+                if name not in emotes:
+                    return False, "Onbekende emote."
+                steps = parse_emote(emotes[name])
+            if not steps:
+                return False, "Deze emote heeft geen stappen."
+        except ValueError as error:
+            return False, str(error)
+        ok = self._start_operator(name or "Emote", lambda _generation, cancel: self.actions._run_steps(steps, cancel))
+        return ok, None if ok else "ARI is nog bezig met een operatoractie."
+
+    def stop_actions(self) -> None:
+        # Invalidate queued speech and in-flight model output, while retaining
+        # the visitor's engine/session and difference-game progress.
+        with self._state_lock:
+            self._generation += 1
+            self._activity = "LISTENING"
+        self.actions.stop()
+        cancel = getattr(self.microphone_input, "cancel_pending", None)
+        if cancel is not None:
+            cancel()
+        try:
+            self.robot.stop()
+        except Exception:
+            pass
+        stop = getattr(self.social_control, "stop_actions", None)
+        with self._control_lock:
+            if stop is not None:
+                stop()
+            self.social_control.set_speaking(False)
+        self.social_control.stop_movement()
+
+    def volume(self, percent: float | None = None) -> int | None:
+        setter = getattr(self.social_control, "volume", None)
+        result = setter(percent) if setter is not None else None
+        if result is not None:
+            self._volume = result
+        return result
+
+    def _phase_for_turn(
+        self,
+        turn: ConversationTurn,
+        generation: int | None = None,
+    ) -> None:
+        with self._state_lock:
+            if generation is not None and generation != self._generation:
+                return
+            if "[PHASE] GOODBYE" in turn.diagnostics and turn.utterances:
+                self._phase = "GOODBYE"
+            else:
+                self._phase = self.engine.state["phase"]
 
     def _set_phase(self, phase: str) -> None:
         with self._state_lock:
@@ -146,12 +387,21 @@ class RuntimeCoordinator:
         cancel = getattr(self.microphone_input, "cancel_pending", None)
         if cancel is not None:
             cancel()
+        self.actions.stop()
         try:
             self.robot.stop()
         except Exception:
             pass
-        self.social_control.set_speaking(False)
         self.social_control.stop_movement()
+        stop = getattr(self.social_control, "stop_actions", None)
+        with self._control_lock:
+            if stop is not None:
+                stop()
+            self.social_control.set_speaking(False)
+        tablet_setter = getattr(self.social_control, "set_tablet_page", None)
+        with self._tablet_lock:
+            if tablet_setter is not None and tablet_setter("Main"):
+                self._tablet_page_sent = "Main"
         self.social_control.set_conversation_active(False)
         with self._engine_lock:
             self.engine.reset_to_standby()
@@ -161,6 +411,11 @@ class RuntimeCoordinator:
         if social.get("robot_connected") is False:
             self.social_control.stop_movement()
             return False
+        if action != "stop" and self.actions.busy():
+            self.stop_actions()
+            self.actions.wait(0.2)
+            if self.actions.busy():
+                return False
         return self.social_control.move(action)
 
     def snapshot(self) -> dict[str, Any]:
@@ -189,6 +444,20 @@ class RuntimeCoordinator:
                 "movement_active": social.get("movement_active", False),
                 "obstacle_sensor": social.get("obstacle_sensor", "none"),
                 "attention_target": social.get("attention_target"),
+                "tablet_available": social.get("tablet_available", False),
+                "tablet_page": social.get("tablet_page"),
+                "tablet_error": social.get("tablet_error"),
+                "active_activity": self.engine.state.get("active_activity"),
+                "game_found_count": self.engine.state.get("game_found_count", 0),
+                "game_target_count": self.engine.state.get("game_target_count", 3),
+                "action": self.actions.current,
+                "action_error": self.actions.error,
+                "emotes": list(load_emotes()),
+                "capabilities": social.get("capabilities", []),
+                "face_count": social.get("face_count", 0),
+                "music_playing": social.get("music_playing", False),
+                "sidecar_version": social.get("sidecar_version"),
+                "volume": self._volume,
             }
         )
         return state
@@ -196,6 +465,12 @@ class RuntimeCoordinator:
 
 def create_app(runtime: RuntimeCoordinator) -> Flask:
     app = Flask(__name__)
+
+    @app.before_request
+    def object_body() -> Any:
+        if request.method == "POST" and not isinstance(request.get_json(silent=True), dict):
+            return jsonify({"ok": False, "error": "JSON-object verwacht."}), 400
+        return None
 
     @app.after_request
     def local_security_headers(response: Any) -> Any:
@@ -226,6 +501,59 @@ def create_app(runtime: RuntimeCoordinator) -> Flask:
     def standby() -> Any:
         runtime.reset_to_standby()
         return jsonify({"ok": True, "phase": "STANDBY"})
+
+    @app.post("/greet")
+    def greet() -> Any:
+        ok = runtime.greet()
+        return jsonify({"ok": ok, "error": None if ok else "ARI is al in gesprek of bezig."}), 200 if ok else 409
+
+    @app.post("/say")
+    def say() -> Any:
+        text = request.get_json().get("text")
+        if not isinstance(text, str) or not text.strip() or len(text) > 400:
+            return jsonify({"ok": False, "error": "Typ 1 tot 400 tekens."}), 400
+        ok = runtime.operator_say(text)
+        return jsonify({"ok": ok, "error": None if ok else "ARI is nog bezig."}), 200 if ok else 409
+
+    @app.post("/expression")
+    def expression() -> Any:
+        name = request.get_json().get("name")
+        if not isinstance(name, str) or name not in EXPRESSIONS:
+            return jsonify({"ok": False, "error": "Onbekend gezicht."}), 400
+        ok = runtime.show_expression(name)
+        return jsonify({"ok": ok, "error": None if ok else "Gezichtsbediening is niet beschikbaar."})
+
+    @app.post("/gesture")
+    def gesture() -> Any:
+        name = request.get_json().get("name")
+        if not isinstance(name, str) or name not in GESTURES:
+            return jsonify({"ok": False, "error": "Onbekend gebaar."}), 400
+        ok = runtime.play_gesture(name)
+        return jsonify({"ok": ok, "error": None if ok else "ARI is nog bezig."}), 200 if ok else 409
+
+    @app.post("/emote")
+    def emote() -> Any:
+        data = request.get_json()
+        name, script = data.get("name"), data.get("script")
+        if (name is not None and not isinstance(name, str)) or (script is not None and not isinstance(script, str)):
+            return jsonify({"ok": False, "error": "Gebruik tekst voor de emote."}), 400
+        ok, error = runtime.play_emote(name, script)
+        return jsonify({"ok": ok, "error": error}), 200 if ok else 400
+
+    @app.post("/stop")
+    def stop() -> Any:
+        runtime.stop_actions()
+        return jsonify({"ok": True})
+
+    @app.route("/volume", methods=["GET", "POST"])
+    def volume() -> Any:
+        percent = None
+        if request.method == "POST":
+            percent = request.get_json().get("percent")
+            if isinstance(percent, bool) or not isinstance(percent, (int, float)) or not math.isfinite(percent) or not 30 <= percent <= 100:
+                return jsonify({"ok": False, "error": "Volume moet tussen 30 en 100 liggen."}), 400
+        result = runtime.volume(percent)
+        return jsonify({"ok": result is not None, "percent": result})
 
     return app
 
@@ -289,6 +617,7 @@ h2 { margin:0 0 14px; font-size:16px; }
 .chip { border-radius:999px; padding:6px 10px; background:#edf1f5; font-size:13px; }
 .chip.good { color:#067647; background:#ecfdf3; }
 .chip.bad { color:var(--red); background:#fef3f2; }
+.hidden { display:none; }
 #log { height:560px; overflow:auto; border-top:1px solid var(--line); padding-top:10px; }
 .entry { margin:12px 0; padding:12px 14px; border-radius:13px; max-width:88%; }
 .entry.visitor { background:#f0f2f5; }
@@ -303,6 +632,10 @@ button.stop { color:var(--red); }
 button.primary { width:100%; margin-top:20px; color:white; background:var(--blue); }
 button:disabled { opacity:.35; cursor:not-allowed; }
 .hint { color:var(--muted); font-size:13px; margin-top:12px; }
+.operator { margin-top:20px; border-top:1px solid var(--line); padding-top:16px; }
+.operator input, .operator textarea, .operator select { width:100%; box-sizing:border-box; margin:6px 0; padding:10px; font:inherit; }
+.operator button { min-height:40px; margin:3px; font-size:14px; }
+.operator .row { display:flex; flex-wrap:wrap; gap:4px; }
 @media(max-width:760px){ main{grid-template-columns:1fr;padding:12px} #log{height:420px} }
 </style>
 </head>
@@ -315,6 +648,7 @@ button:disabled { opacity:.35; cursor:not-allowed; }
       <span id="activity" class="chip">LISTENING</span>
       <span id="attention" class="chip">Aandacht: onbekend</span>
       <span id="expression" class="chip">Gezicht: onbekend</span>
+      <span id="game" class="chip hidden"></span>
     </div>
     <div id="log" aria-live="polite"></div>
   </section>
@@ -329,12 +663,27 @@ button:disabled { opacity:.35; cursor:not-allowed; }
     </div>
     <p id="moveHint" class="hint">Beweging is alleen beschikbaar met de veilige robot-sidecar.</p>
     <button id="standby" class="primary">Terug naar standby</button>
+    <div class="operator">
+      <h2>Operatorbediening</h2>
+      <div class="row"><button id="greet">Begroet bezoeker</button><button id="stopActions" class="stop">STOP acties</button></div>
+      <form id="sayForm"><input id="sayText" maxlength="400" placeholder="Laat ARI iets zeggen" aria-label="Tekst voor ARI"><button type="submit">Zeg</button></form>
+      <div id="phrases" class="row"></div>
+      <h2>Gezicht en gebaren</h2>
+      <div id="faces" class="row"></div>
+      <div class="row"><button data-gesture="wave">Zwaaien</button><button data-gesture="nod">Knikken</button><button data-gesture="cheer">Juichen</button></div>
+      <h2>Emotes</h2><div id="emotes" class="row"></div>
+      <details><summary>Eigen emote</summary><textarea id="emoteScript" rows="3" placeholder="gesture wave&#10;say Goedendag!&#10;wait 1"></textarea><button id="runScript">Speel af</button></details>
+      <label for="volume">Volume: <span id="volumeText">--</span></label>
+      <input id="volume" type="range" min="30" max="100" step="5" value="80">
+      <p id="operatorStatus" class="hint" aria-live="polite"></p>
+    </div>
   </aside>
 </main>
 <script>
 let moveTimer = null;
 let heldAction = null;
 let refreshInProgress = false;
+let volumeLoaded = false;
 
 async function post(path, body) {
   try {
@@ -363,6 +712,7 @@ for (const button of document.querySelectorAll('[data-move]')) {
 }
 const keys = {ArrowUp:'forward',ArrowDown:'back',ArrowLeft:'left',ArrowRight:'right'};
 document.addEventListener('keydown', event => {
+  if (['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) return;
   if (keys[event.key]) { event.preventDefault(); if (!event.repeat) startMove(keys[event.key]); }
 });
 document.addEventListener('keyup', event => {
@@ -374,6 +724,35 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) stopM
 document.getElementById('standby').addEventListener('click', async () => {
   stopMove(); await post('/standby'); await refresh();
 });
+
+async function operatorAction(path, body) {
+  const result = await post(path, body);
+  document.getElementById('operatorStatus').textContent = result.ok ? 'Opdracht ontvangen.' : (result.error || 'Opdracht is niet beschikbaar.');
+  return result;
+}
+document.getElementById('greet').onclick = () => operatorAction('/greet');
+document.getElementById('stopActions').onclick = () => { stopMove(); operatorAction('/stop'); };
+document.getElementById('sayForm').onsubmit = async event => {
+  event.preventDefault(); const input = document.getElementById('sayText');
+  if ((await operatorAction('/say', {text:input.value})).ok) input.value = '';
+};
+for (const [label, text] of [['Welkom','Goedendag, welkom bij onze stand!'],['Momentje','Een momentje alstublieft.'],['Tot ziens','Dank u wel en tot ziens!']]) {
+  const button = document.createElement('button'); button.textContent = label;
+  button.onclick = () => operatorAction('/say', {text}); document.getElementById('phrases').append(button);
+}
+for (const [name,label] of [['happy','Blij'],['neutral','Neutraal'],['sad','Verdrietig'],['surprised','Verrast'],['thinking','Denkend'],['excited','Enthousiast']]) {
+  const button = document.createElement('button'); button.textContent = label;
+  button.onclick = () => operatorAction('/expression', {name}); document.getElementById('faces').append(button);
+}
+for (const button of document.querySelectorAll('[data-gesture]')) button.onclick = () => operatorAction('/gesture', {name:button.dataset.gesture});
+document.getElementById('runScript').onclick = () => operatorAction('/emote', {script:document.getElementById('emoteScript').value});
+document.getElementById('volume').onchange = event => {
+  document.getElementById('volumeText').textContent = event.target.value + '%';
+  operatorAction('/volume', {percent:Number(event.target.value)});
+};
+document.getElementById('volume').oninput = event => {
+  document.getElementById('volumeText').textContent = event.target.value + '%';
+};
 
 function chip(id, text, good) {
   const element = document.getElementById(id); element.textContent = text;
@@ -398,13 +777,41 @@ async function refresh() {
   refreshInProgress = true;
   try {
     const state = await (await fetch('/state', {cache:'no-store'})).json();
+    if (state.control_connected && !volumeLoaded) {
+      volumeLoaded = true;
+      fetch('/volume').then(response => response.json()).then(data => {
+        if (typeof data.percent === 'number') {
+          document.getElementById('volume').value = data.percent;
+          document.getElementById('volumeText').textContent = data.percent + '%';
+        }
+      }).catch(() => {});
+    }
+    if (!state.control_connected) volumeLoaded = false;
     chip('connection', state.connected ? 'Robot verbonden' : 'Robot niet verbonden', state.connected);
     chip('phase', state.phase); chip('activity', state.activity);
     chip('attention', state.control_connected
       ? 'Aandacht: ' + state.attention_mode
       : 'Aandacht: niet verbonden', state.control_connected);
     chip('expression', 'Gezicht: ' + state.expression, state.expression !== 'unknown' ? true : null);
+    const game = document.getElementById('game');
+    if (state.active_activity === 'ZOEK_DE_VERSCHILLEN') {
+      game.textContent = 'Zoek de verschillen: ' + state.game_found_count +
+        ' van ' + state.game_target_count + ' gevonden';
+      game.className = 'chip';
+    } else {
+      game.className = 'chip hidden';
+    }
     renderTranscript(state.transcript || []);
+    const emotes = document.getElementById('emotes');
+    const names = JSON.stringify(state.emotes || []);
+    if (emotes.dataset.names !== names) {
+      emotes.dataset.names = names; emotes.replaceChildren();
+      for (const name of state.emotes || []) {
+        const button = document.createElement('button'); button.textContent = name;
+        button.onclick = () => operatorAction('/emote', {name}); emotes.append(button);
+      }
+    }
+    if (state.action_error) document.getElementById('operatorStatus').textContent = state.action_error;
     for (const button of document.querySelectorAll('[data-move]'))
       button.disabled = !state.movement_available && button.dataset.move !== 'stop';
     document.getElementById('moveHint').textContent = state.movement_available

@@ -23,4 +23,7 @@ dist/
 .idea/
 .DS_Store
 
-/tests
+/tests/*
+!/tests/test_ari_operator.py
+!/tests/test_ari_emotes.py
+!/tests/test_robot_hub.py

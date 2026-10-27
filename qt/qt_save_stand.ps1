@@ -20,7 +20,7 @@ $RemoteStandFile = "$RemoteDirectory/stand_proxy.py"
 $RemoteNewFile = "$RemoteDirectory/stand_proxy.new.py"
 $RemoteBackupFile = "$RemoteDirectory/stand_proxy.py.bak"
 $RemoteLogFile = "/tmp/qt-stand.log"
-$ExpectedStandVersion = "demo-face-grace-12s-v1"
+$ExpectedStandVersion = "demo-face-grace-12s-greeting-v2"
 
 $SshConnectTimeoutSeconds = 10
 $GracefulStopWaitSeconds = 5

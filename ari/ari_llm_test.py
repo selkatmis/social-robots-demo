@@ -27,7 +27,10 @@ def print_turn(turn: ConversationTurn) -> None:
 
 
 def main() -> None:
-    engine = ConversationEngine(LLM(system_prompt=prompts.SYSTEM_PROMPT))
+    engine = ConversationEngine(
+        LLM(system_prompt=prompts.SYSTEM_PROMPT),
+        activities_enabled=True,
+    )
     print_turn(engine.start())
 
     while not engine.is_done:

@@ -35,7 +35,7 @@ $QtStandFile = "stand_proxy.py"
 
 $QtLanguage = "nl-NL"
 $QtVolume = 130
-$ExpectedStandVersion = "demo-face-grace-12s-v1"
+$ExpectedStandVersion = "demo-face-grace-12s-greeting-v2"
 $SshConnectTimeoutSeconds = 10
 $StartupTimeoutSeconds = 30
 $GracefulStopWaitSeconds = 5

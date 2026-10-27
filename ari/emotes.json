@@ -1,0 +1,95 @@
+{
+  "__what_the_steps_mean__": {
+    "head <pan> <tilt> <seconds>": "Point the head. pan: + is left, - is right, up to 72. tilt: + is up to 14, - is down to 24. seconds: how long the move takes, e.g. 'head 40 10 0.4'. Attention takes the head back 3 seconds after the last head step.",
+    "turn <degrees>": "Turn the whole robot on the spot. + is left, - is right, e.g. 'turn 30'.",
+    "drive <metres>": "Roll straight. + is forward (at most 0.5 m), - is backward (at most 0.3 m). Forward stops by itself when something is closer than 45 cm, backward has no sensor, so keep it short.",
+    "gesture <name>": "Play a supported arm gesture: wave, nod, cheer or farewell.",
+    "expression <name>": "Explicit operator face override; automatic speech/standby rules resume after the emote.",
+    "say <text>": "Say a line out loud in Dutch, e.g. 'say Goedemorgen!'.",
+    "music <on|off>": "Start or stop the dance music on ARI's speaker. The music always stops when the emote ends.",
+    "wait <seconds>": "Hold still, e.g. 'wait 1.5'."
+  },
+  "__how_to_add_one__": "Add a name with a list of steps below. It shows up on the iPad the next time the page refreshes, no restart needed. The Dans has no driving on purpose, because people stand close to ARI at the stand.",
+  "emotes": {
+    "Dans": [
+      "music on",
+      "expression excited",
+      "head 40 10 0.4",
+      "head -40 -10 0.4",
+      "head 40 10 0.4",
+      "head -40 -10 0.4",
+      "gesture wave",
+      "turn 35",
+      "turn -70",
+      "turn 35",
+      "head 0 12 0.3",
+      "head 0 -14 0.3",
+      "head 0 12 0.3",
+      "head 0 -14 0.3",
+      "gesture cheer",
+      "turn 25",
+      "turn -25",
+      "head 35 -8 0.4",
+      "head -35 -8 0.4",
+      "head 0 0 0.4",
+      "gesture cheer",
+      "music off",
+      "expression happy",
+      "say Zo, dat was mijn dansje. Bewegen is gezond, ook voor een robot!"
+    ],
+    "Feest": [
+      "music on",
+      "expression excited",
+      "head 40 10 0.4",
+      "head -40 -10 0.4",
+      "head 40 10 0.4",
+      "head -40 -10 0.4",
+      "turn 30",
+      "turn -60",
+      "turn 30",
+      "gesture cheer",
+      "head 0 0 0.5",
+      "music off"
+    ],
+    "Hallo": [
+      "expression happy",
+      "gesture wave",
+      "say Hallo! Ik ben ARI, een sociale robot.",
+      "head 0 8 0.4",
+      "head 0 0 0.4"
+    ],
+    "Hoera": [
+      "expression excited",
+      "gesture cheer",
+      "say Hoera!"
+    ],
+    "Ja": [
+      "expression happy",
+      "head 0 10 0.3",
+      "head 0 -14 0.3",
+      "head 0 10 0.3",
+      "head 0 0 0.3"
+    ],
+    "Nee": [
+      "expression sad",
+      "head 25 0 0.3",
+      "head -25 0 0.3",
+      "head 25 0 0.3",
+      "head 0 0 0.3"
+    ],
+    "Rondkijken": [
+      "expression thinking",
+      "head 60 0 0.8",
+      "head -60 0 0.8",
+      "head 0 -20 0.6",
+      "head 0 0 0.5"
+    ],
+    "Wiebelen": [
+      "expression excited",
+      "turn 15",
+      "turn -30",
+      "turn 30",
+      "turn -15"
+    ]
+  }
+}

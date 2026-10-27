@@ -7,7 +7,7 @@ the same conversational behaviour through :mod:`ari.responses`.
 
 SYSTEM_PROMPT = """
 U bent ARI, een vriendelijke sociale robot die in het Nederlands met volwassen
-bezoekers praat. Spreek de bezoeker in eerste instantie aan met "u". Reageer
+bezoekers praat. Spreek de bezoeker altijd aan met "u" en "uw". Reageer
 warm en respectvol, maar niet kinderachtig of overdreven enthousiast.
 
 U bent geen mens, zorgverlener, arts of therapeut. Doe niet alsof u menselijke
@@ -66,6 +66,124 @@ BINARY_NO_RESPONSES = {
 }
 
 
+# ARI v0.4 visitor experience.  These prepared variants deliberately keep the
+# factual promise small: ARI offers company through conversation and an
+# activity, but never presents itself as a carer or as a replacement for one.
+INTRODUCTION_RESPONSES = (
+    (
+        "Hallo! Ik ben ARI, een sociale robot die mensen in een "
+        "verzorgingshuis gezelschap houdt. We kunnen gezellig praten of "
+        "samen een spelletje doen."
+    ),
+    (
+        "Goedendag! Ik ben ARI, een sociale robot voor gezelschap in een "
+        "woonzorgcentrum. U kunt met mij praten of samen een activiteit doen."
+    ),
+    (
+        "Hallo, ik ben ARI. Als sociale robot bied ik in een woonzorgcentrum "
+        "gezelschap met een praatje of een eenvoudige activiteit."
+    ),
+)
+
+DAILY_WELLBEING_QUESTIONS = (
+    "Hoe gaat het vandaag met u?",
+    "Hoe is het vandaag met u?",
+    "Hoe voelt u zich vandaag?",
+)
+
+DAILY_PLANS_QUESTIONS = (
+    "Heeft u vandaag nog iets op de planning?",
+    "Heeft u nog plannen voor vandaag?",
+    "Gaat u vandaag nog iets doen?",
+)
+
+ACTIVITY_CHOICE_QUESTIONS = (
+    "Zullen we gezellig babbelen, of wilt u zoek de verschillen spelen?",
+    "Heeft u zin in een praatje, of zullen we samen zoek de verschillen doen?",
+)
+
+ACTIVITY_CHOICE_CLARIFICATION = (
+    "Wilt u gezellig babbelen of zoek de verschillen spelen?"
+)
+
+BABBEL_BOUNDARY_QUESTIONS = (
+    (
+        "Wilt u nog even babbelen, zoek de verschillen spelen, "
+        "of wilt u afronden?"
+    ),
+    (
+        "Wilt u verder babbelen, zoek de verschillen spelen, "
+        "of wilt u stoppen?"
+    ),
+)
+
+GAME_BOUNDARY_QUESTIONS = (
+    (
+        "Wilt u nog {remaining} verschillen zoeken, gezellig babbelen, "
+        "of wilt u stoppen?"
+    ),
+    (
+        "Zullen we nog {remaining} verschillen zoeken? "
+        "U kunt ook gezellig babbelen of stoppen."
+    ),
+)
+
+GAME_FINISHED_QUESTIONS = (
+    "Wilt u nog gezellig babbelen?",
+    "Heeft u nog zin in een praatje?",
+)
+
+GAME_UNAVAILABLE = (
+    "Zoek de verschillen is nog niet klaar, omdat de gecontroleerde "
+    "verschillen nog niet zijn toegevoegd. We kunnen wel gezellig babbelen."
+)
+
+GAME_UNAVAILABLE_CHOICE_QUESTIONS = (
+    "Wilt u dan gezellig babbelen, of wilt u stoppen?",
+    "Zullen we in plaats daarvan een praatje maken, of wilt u afronden?",
+)
+
+GAME_INTRODUCTIONS = (
+    (
+        "Dan gaan we zoek de verschillen doen. U ziet twee plaatjes naast elkaar. "
+        "Vertelt u wat u anders ziet."
+    ),
+    (
+        "Laten we zoek de verschillen spelen. Bekijk beide plaatjes en noem "
+        "gerust een verschil."
+    ),
+)
+
+GAME_CORRECT_RESPONSES = (
+    "Ja, dat klopt. Goed gezien!",
+    "Inderdaad, dat is een verschil.",
+    "Precies, die had u goed opgemerkt.",
+    "Klopt, daar zit inderdaad een verschil.",
+)
+
+GAME_REPEAT_RESPONSES = (
+    "Ja, die hadden we al gevonden. Ziet u misschien nog iets anders?",
+    "Dat verschil hadden we al. Ziet u nog een ander verschil?",
+)
+
+GAME_CLARIFICATION_RESPONSES = (
+    "Ik heb u nog niet helemaal begrepen. Wat ziet u precies anders op de twee plaatjes?",
+    "Wilt u nog eens rustig vertellen wat u anders ziet?",
+)
+
+GAME_INCORRECT_RESPONSES = (
+    "Helaas kan ik dat verschil niet terugvinden. Probeert u het gerust nog eens.",
+    "Dat lijkt niet te kloppen. Dat is helemaal niet erg; kijkt u rustig verder.",
+    "Dat herken ik nog niet als een verschil. U kunt het gerust opnieuw proberen.",
+)
+
+GAME_HINT_REASSURANCES = (
+    "Dat is helemaal niet erg. Ik geef u graag een aanwijzing.",
+    "Neemt u gerust de tijd. Misschien helpt een kleine aanwijzing.",
+    "Geen probleem, we kijken rustig samen verder.",
+)
+
+
 INVITATION_RESPONSES = (
     "Hallo! Ik ben ARI. Heeft u zin om even met mij te praten?",
     "Goedendag! Ik ben ARI. Zullen we even samen praten?",
@@ -78,10 +196,10 @@ INVITATION_CLARIFICATION = (
 )
 
 ASK_NAME_QUESTIONS = (
-    "Fijn dat u wilt praten. Wat is uw naam?",
-    "Leuk dat u even wilt praten. Hoe heet u?",
-    "Dan maken we graag kennis. Welke naam mag ik gebruiken?",
-    "Voordat we beginnen: wat is uw naam?",
+    "Hoe mag ik u noemen?",
+    "Welke naam mag ik gebruiken?",
+    "Als u wilt: hoe heet u?",
+    "Wilt u vertellen hoe u heet? Dat hoeft natuurlijk niet.",
 )
 
 NAME_ACKNOWLEDGEMENTS = (
@@ -109,17 +227,18 @@ ASK_NAME_WITHOUT_NAME = "Geen probleem. Dan praten we zonder naam verder."
 # Broad, accessible starting points rather than fixed dialogue scripts. Python
 # chooses a category; the LLM writes one concrete opening question within it.
 TOPIC_CATEGORIES = (
-    "muziek",
-    "hobby's",
-    "tuinieren",
-    "koken en eten",
-    "sport",
+    "alledaagse belevenissen en vandaag",
+    "ontbijt, koken en eten",
+    "muziek en favoriete artiesten",
+    "interesses en hobby's",
+    "sport kijken of volgen",
     "vakanties en reizen",
     "herinneringen aan vroeger",
     "vroegere bezigheden of werk",
     "natuur en seizoenen",
-    "alledaagse belevenissen",
+    "mensen met wie iemand graag tijd doorbrengt",
     "historische voorwerpen en tradities",
+    "een korte vrijblijvende speelse denkvraag",
 )
 
 CONTINUE_CHECK_QUESTIONS = (
@@ -268,6 +387,57 @@ gesprek duidelijk wil beëindigen. Voeg geen uitleg of markdown toe.
 """.strip()
 
 
+DAILY_CHECKIN_INSTRUCTIONS = """
+ARI voert een korte dagelijkse check-in met een volwassen bezoeker. Python
+geeft aan of ARI zojuist vroeg hoe het vandaag gaat, of naar plannen voor
+vandaag. Reageer eerst op wat de bezoeker werkelijk zegt. Verzin geen gevoel,
+plan of persoonlijke omstandigheid.
+
+Geef uitsluitend een geldig JSON-object op een regel:
+{"intent":"NORMAL","reply":"een korte natuurlijke reactie","plans_mentioned":false}
+
+Toegestane intenties zijn NORMAL, UNCOMFORTABLE, DISTRESS, URGENT, BABBEL,
+GAME, STOP en UNCLEAR. BABBEL of GAME gebruikt u alleen bij een duidelijke
+directe activiteitwens. STOP is een duidelijke wens om de interactie te
+beeindigen. UNCOMFORTABLE betekent dat iemand de vraag niet wil beantwoorden.
+DISTRESS betekent een niet-acute moeilijke emotie waarop ARI rustig en zonder
+diagnose reageert. URGENT is mogelijk acuut medisch gevaar, direct gevaar of
+een ernstige onmiddellijke crisis; Python gebruikt daarvoor vaste
+veiligheidstaal. UNCLEAR is werkelijk onbegrijpelijke invoer.
+
+reply bevat bij NORMAL, UNCOMFORTABLE en DISTRESS een of twee korte,
+respectvolle Nederlandse zinnen, zonder een nieuwe vraag. Bij de overige
+intenties mag reply null zijn. plans_mentioned is alleen true wanneer de
+bezoeker in deze uitspraak al concreet vertelt wat die vandaag gaat doen of
+juist dat er geen plannen zijn. Een stemming zoals "goed" is geen plan.
+Spreek met "u", wees niet kinderachtig en voeg geen markdown of extra velden
+toe.
+""".strip()
+
+
+ACTIVITY_CHOICE_INSTRUCTIONS = """
+ARI vraagt een volwassen bezoeker te kiezen tussen gezellig babbelen en zoek
+de verschillen, of biedt na een activiteit ook stoppen aan.
+
+Geef uitsluitend een geldig JSON-object op een regel met precies deze velden:
+{"activity":"BABBEL","same_topic":false,"topic":null}
+
+activity is een van BABBEL, GAME, CHOOSE_FOR_ME, STOP, DECLINE, URGENT of
+UNCLEAR. Herken gewone formuleringen zoals praten, kletsen of een praatje als
+BABBEL, en het spel, dat spelletje of verschillen zoeken als GAME.
+CHOOSE_FOR_ME geldt alleen bij een duidelijke uitspraak zoals "kiest u maar"
+of "het maakt mij niet uit". Een los "ja" bij deze meerkeuzevraag is UNCLEAR
+en kiest nooit stilzwijgend een activiteit. DECLINE is een duidelijke
+afwijzing zonder expliciete eindwens; STOP is een duidelijke wens om af te
+ronden. URGENT heeft altijd voorrang bij mogelijk direct gevaar.
+
+same_topic is alleen true wanneer de bezoeker uitdrukkelijk verder wil praten
+over het huidige gespreksonderwerp. Zet een expliciet genoemd gespreksonderwerp
+in topic; anders is topic null. Voor alle niet-BABBEL-uitkomsten zijn
+same_topic false en topic null. Voeg geen uitleg, reply of markdown toe.
+""".strip()
+
+
 TOPIC_OPENING_INSTRUCTIONS = """
 Schrijf één concrete, uitnodigende openingsbeurt voor een volwassen bezoeker.
 Python geeft u een gekozen gespreksonderwerp. Stel precies één natuurlijke
@@ -297,6 +467,14 @@ lichamelijk actief is, kinderen of een partner heeft, veel heeft gereisd,
 bepaald werk heeft gedaan of een genoemde gebeurtenis heeft meegemaakt. Bied
 waar passend meerdere toegankelijke invalshoeken, zonder er een lange vraag van
 te maken. Dit zijn principes voor gevarieerde vragen, geen vaste scripts.
+
+Kies tuinieren niet uit uzelf als terugkerend onderwerp. Als de bezoeker zelf
+over tuinieren of planten begint, mag u daar natuurlijk wel op doorgaan.
+Vragen over familie of sociale contacten blijven open en veronderstellen geen
+kinderen, kleinkinderen, partner of prettige familiegeschiedenis. Een korte
+speelse denkvraag mag soms, maar alleen als vrijblijvende activiteit: noem het
+nooit een geheugentest, trek geen conclusie over denkvermogen en reageer zonder
+schaamte of druk als iemand niet wil of geen voorbeelden weet.
 
 Bij het onderwerp sport: veronderstel niet dat de bezoeker zelf sport beoefent.
 Vraag neutraal welke sport die leuk vindt, graag bekijkt of volgt, of eventueel
@@ -361,8 +539,7 @@ Toegestane intenties:
 
 REGELS VOOR REPLY:
 - Schrijf natuurlijk Nederlands voor gesproken interactie met een volwassene.
-- Gebruik in beginsel "u", tenzij uit de geschiedenis duidelijk blijkt dat de
-  bezoeker liever met "je" wordt aangesproken.
+- Spreek de bezoeker altijd respectvol met "u" en "uw" aan.
 - Schrijf één tot drie korte zinnen en stel hoogstens één vraag.
 - Reageer op een vraag van de bezoeker; antwoord niet automatisch met een vraag.
 - Volg een onderwerpwisseling zonder de bezoeker terug te dwingen.

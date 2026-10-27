@@ -1,4 +1,8 @@
-"""Shared, hardware-independent conversation engine for ARI v0.1."""
+"""Shared, hardware-independent conversation engine for ARI.
+
+The v0.4 visitor experience is the default.  The original v0.3 conversation
+path remains available to regression callers with ``activities_enabled=False``.
+"""
 
 from __future__ import annotations
 
@@ -9,13 +13,19 @@ from dataclasses import dataclass
 from typing import Any
 
 from ari import prompts
+from ari.difference_game import DifferenceGame, INVALID, UNCERTAIN
 
 
 VALID_PHASES = {
     "STANDBY",
     "INVITATION",
+    "INTRODUCTION",
     "ASK_NAME",
+    "DAILY_CHECKIN",
+    "ACTIVITY_CHOICE",
     "CONVERSATION",
+    "GEZELLIG_BABBELEN",
+    "ZOEK_DE_VERSCHILLEN",
     "CONTINUE_CHECK",
     "GOODBYE",
 }
@@ -33,8 +43,12 @@ MAX_REPLY_CHARACTERS = 600
 MAX_INVITATION_UNCLEAR = 2
 MAX_STOP_CONFIRMATION_UNCLEAR = 2
 MAX_CONTINUE_CHECK_UNCLEAR = 2
+MAX_ACTIVITY_CHOICE_UNCLEAR = 2
 MIN_TOPIC_QUESTIONS = 3
 MAX_TOPIC_QUESTIONS = 4
+
+TABLET_MAIN_PAGE = "Main"
+TABLET_GAME_PAGE = "Zoek_de_verschillen"
 
 
 def make_initial_state() -> dict[str, Any]:
@@ -55,6 +69,17 @@ def make_initial_state() -> dict[str, Any]:
         "continue_check_attempts": 0,
         "topic_question_count": 0,
         "used_topic_categories": [],
+        "introduction_given": False,
+        "daily_checkin_step": None,
+        "activity_choice_context": None,
+        "activity_choice_attempts": 0,
+        "active_activity": None,
+        "game_found_count": 0,
+        "game_target_count": 3,
+        "game_available_count": 0,
+        "game_target_reached": False,
+        "game_all_found": False,
+        "tablet_page": None,
     }
 
 
@@ -65,6 +90,8 @@ class ConversationTurn:
     utterances: tuple[str, ...]
     diagnostics: tuple[str, ...] = ()
     status: str = "waiting_for_input"
+    tablet_page: str | None = None
+    greeting_wave: bool = False
 
     @property
     def awaiting_input(self) -> bool:
@@ -141,7 +168,14 @@ def classify_simple_binary_response(visitor_text: str) -> str | None:
 def is_explicit_stop_request(visitor_text: str) -> bool:
     """Catch only unambiguous stop requests before calling the LLM."""
     normalized = normalize_for_matching(visitor_text)
-    if normalized in {"stop", "stoppen", "doei", "tot ziens"}:
+    if normalized in {
+        "stop",
+        "stoppen",
+        "doei",
+        "tot ziens",
+        "ik ben klaar",
+        "ik ga weer",
+    }:
         return True
 
     patterns = (
@@ -153,8 +187,36 @@ def is_explicit_stop_request(visitor_text: str) -> bool:
         r"\bik wil (?:dit |het )?gesprek (?:beeindigen|beëindigen|afsluiten)\b",
         r"\b(?:het|dit) is (?:wel )?genoeg geweest\b",
         r"\bvoor mij is het (?:wel )?genoeg\b",
+        r"\bik ben (?:nu |wel )?klaar\b",
+        r"\bik ga (?:maar )?weer\b",
     )
     return any(re.search(pattern, normalized) for pattern in patterns)
+
+
+def obvious_activity_request(visitor_text: str) -> str | None:
+    """Recognize only explicit activity requests before consulting the LLM."""
+    normalized = normalize_for_matching(visitor_text)
+    if re.search(r"\b(?:niet|geen|nee)\b", normalized):
+        # Let the contextual classifier resolve negation and mixed choices.
+        return None
+    game_patterns = (
+        r"\bzoek de verschillen\b",
+        r"\bverschillen (?:zoeken|spel(?:en)?)\b",
+        r"\b(?:het|dat) spel(?:letje)?\b",
+        r"\bspel(?:letje)? spelen\b",
+        r"\bverder zoeken\b",
+    )
+    babbel_patterns = (
+        r"\b(?:gezellig )?(?:babbelen|kletsen)\b",
+        r"\b(?:gewoon|liever|even) praten\b",
+        r"\b(?:ik wil|laten we|we kunnen)(?: graag)? praten\b",
+        r"\been praatje\b",
+    )
+    if any(re.search(pattern, normalized) for pattern in game_patterns):
+        return "GAME"
+    if any(re.search(pattern, normalized) for pattern in babbel_patterns):
+        return "BABBEL"
+    return None
 
 
 def _extract_json_object(raw_response: Any) -> dict[str, Any] | None:
@@ -186,6 +248,10 @@ def _clean_spoken_reply(value: Any) -> str | None:
     # These markers add no value in speech and occasionally slip through even
     # with a strict prompt.
     reply = reply.replace("**", "").replace("__", "").replace("`", "")
+    if re.search(r"\b(?:je|jij|jou|jouw|jullie)\b", reply, re.IGNORECASE):
+        # Keep the spoken register respectful even if a generated reply
+        # accidentally ignores the formal-address instructions.
+        return None
     if reply.count("?") > 1:
         return None
     return reply.strip() or None
@@ -314,9 +380,20 @@ def _capitalize_name(name_words: list[str]) -> str:
 class ConversationEngine:
     """Small phase-based conversation brain shared by all ARI adapters."""
 
-    def __init__(self, llm: Any, *, state: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        llm: Any,
+        *,
+        state: dict[str, Any] | None = None,
+        activities_enabled: bool = True,
+        difference_game: DifferenceGame | None = None,
+    ) -> None:
         self.llm = llm
         self._state = make_initial_state() if state is None else state
+        self._activities_enabled = bool(activities_enabled)
+        self.difference_game = difference_game or DifferenceGame()
+        self._pending_tablet_page: str | None = None
+        self._pending_greeting_wave = False
         self._started = False
         self._entry_pending = True
         self._shutdown = False
@@ -358,10 +435,20 @@ class ConversationEngine:
             self._handle_standby(text, utterances, diagnostics)
         elif phase == "INVITATION":
             self._handle_invitation(text, utterances, diagnostics)
+        elif phase == "INTRODUCTION":
+            raise RuntimeError("INTRODUCTION does not accept visitor input")
         elif phase == "ASK_NAME":
             self._handle_ask_name(text, utterances, diagnostics)
+        elif phase == "DAILY_CHECKIN":
+            self._handle_daily_checkin(text, utterances, diagnostics)
+        elif phase == "ACTIVITY_CHOICE":
+            self._handle_activity_choice(text, utterances, diagnostics)
         elif phase == "CONVERSATION":
             self._handle_conversation(text, utterances, diagnostics)
+        elif phase == "GEZELLIG_BABBELEN":
+            self._handle_babbel(text, utterances, diagnostics)
+        elif phase == "ZOEK_DE_VERSCHILLEN":
+            self._handle_difference_game(text, utterances, diagnostics)
         elif phase == "CONTINUE_CHECK":
             self._handle_continue_check(text, utterances, diagnostics)
         elif phase == "GOODBYE":
@@ -377,6 +464,7 @@ class ConversationEngine:
         self._clear_visitor_session()
         self._state["phase"] = "STANDBY"
         self._entry_pending = False
+        self._request_tablet_page(TABLET_MAIN_PAGE)
         self._shutdown = True
         return self._turn((), ())
 
@@ -385,17 +473,48 @@ class ConversationEngine:
         self._clear_visitor_session()
         self._state["phase"] = "STANDBY"
         self._entry_pending = False
+        self._request_tablet_page(TABLET_MAIN_PAGE)
         return self._turn(
             (),
             ("[OPERATOR] Session reset", "[PHASE] STANDBY"),
         )
 
+    def handle_tablet_navigation_failure(self) -> ConversationTurn:
+        """Leave a just-entered game safely when its page could not be shown."""
+        if self._state.get("phase") != "ZOEK_DE_VERSCHILLEN":
+            return self._turn((), ())
+        utterances = [
+            "Ik kan het spel nu niet veilig op het scherm tonen. "
+            "We kunnen wel gezellig babbelen."
+        ]
+        diagnostics = ["[TABLET] GAME_PAGE_UNAVAILABLE"]
+        history = self._state.get("conversation_history", [])
+        if history and history[-1].get("role") == "ari" and (
+            history[-1].get("content") in prompts.GAME_INTRODUCTIONS
+            or str(history[-1].get("content", "")).startswith(
+                "Prima, dan zoeken we verder"
+            )
+        ):
+            history.pop()
+        self._state.pop("game_has_started", None)
+        self._state["active_activity"] = None
+        self._state["activity_choice_context"] = "game_unavailable"
+        self._append_history("ari", utterances[0])
+        self._set_phase("ACTIVITY_CHOICE", diagnostics)
+        self._settle(utterances, diagnostics)
+        return self._turn(utterances, diagnostics)
+
     def _turn(self, utterances: Any, diagnostics: Any) -> ConversationTurn:
-        return ConversationTurn(
+        turn = ConversationTurn(
             utterances=tuple(utterances),
             diagnostics=tuple(diagnostics),
             status="done" if self.is_done else "waiting_for_input",
+            tablet_page=self._pending_tablet_page,
+            greeting_wave=self._pending_greeting_wave,
         )
+        self._pending_tablet_page = None
+        self._pending_greeting_wave = False
+        return turn
 
     def _set_phase(self, phase: str, diagnostics: list[str]) -> None:
         if phase not in VALID_PHASES:
@@ -403,6 +522,31 @@ class ConversationEngine:
         self._state["phase"] = phase
         self._entry_pending = True
         diagnostics.append(f"[PHASE] {phase}")
+        if self._activities_enabled:
+            keep_game_visible = phase == "ZOEK_DE_VERSCHILLEN" or (
+                phase == "ACTIVITY_CHOICE"
+                and self._state.get("activity_choice_context") == "after_game"
+            )
+            desired_page = (
+                TABLET_GAME_PAGE
+                if keep_game_visible and self.difference_game.ready
+                else TABLET_MAIN_PAGE
+            )
+            self._request_tablet_page(desired_page, diagnostics)
+
+    def _request_tablet_page(
+        self,
+        page: str,
+        diagnostics: list[str] | None = None,
+    ) -> None:
+        if not self._activities_enabled:
+            return
+        if self._state.get("tablet_page") == page:
+            return
+        self._state["tablet_page"] = page
+        self._pending_tablet_page = page
+        if diagnostics is not None:
+            diagnostics.append(f"[TABLET] {page}")
 
     def _settle(
         self,
@@ -424,6 +568,24 @@ class ConversationEngine:
         phase = self._state["phase"]
         if phase == "STANDBY":
             # Deliberately silent: both adapters immediately keep listening.
+            self._request_tablet_page(TABLET_MAIN_PAGE, diagnostics)
+            return
+        if phase == "INTRODUCTION":
+            self._pending_greeting_wave = True
+            introduction = choose_nonrepeating_response(
+                self._state,
+                "last_introduction_response",
+                prompts.INTRODUCTION_RESPONSES,
+            )
+            self._state["introduction_given"] = True
+            utterances.append(introduction)
+            self._append_history("ari", introduction)
+            requested_activity = self._state.pop("pending_requested_activity", None)
+            if requested_activity is not None:
+                diagnostics.append(f"[ACTIVITY] {requested_activity}")
+                self._start_activity(requested_activity, diagnostics)
+                return
+            self._set_phase("ASK_NAME", diagnostics)
             return
         if phase == "INVITATION":
             invitation = choose_nonrepeating_response(
@@ -443,6 +605,12 @@ class ConversationEngine:
             self._state["active_name_question"] = question
             utterances.append(question)
             return
+        if phase == "DAILY_CHECKIN":
+            self._enter_daily_checkin(utterances)
+            return
+        if phase == "ACTIVITY_CHOICE":
+            self._enter_activity_choice(utterances)
+            return
         if phase == "CONVERSATION":
             if self._state.pop("skip_conversation_opening", False):
                 return
@@ -456,6 +624,12 @@ class ConversationEngine:
             self._append_history("ari", opening)
             if _contains_spoken_question(opening):
                 self._state["topic_question_count"] += 1
+            return
+        if phase == "GEZELLIG_BABBELEN":
+            self._enter_babbel(utterances, diagnostics)
+            return
+        if phase == "ZOEK_DE_VERSCHILLEN":
+            self._enter_difference_game(utterances, diagnostics)
             return
         if phase == "CONTINUE_CHECK":
             question = choose_nonrepeating_response(
@@ -499,6 +673,7 @@ class ConversationEngine:
         self._set_phase("STANDBY", diagnostics)
 
     def _clear_visitor_session(self) -> None:
+        self._pending_greeting_wave = False
         self._state["conversation_history"] = []
         self._state["visitor_details"] = {}
         self._state["visitor_name"] = None
@@ -513,12 +688,26 @@ class ConversationEngine:
         self._state["continue_check_attempts"] = 0
         self._state["topic_question_count"] = 0
         self._state["used_topic_categories"] = []
+        self._state["introduction_given"] = False
+        self._state["daily_checkin_step"] = None
+        self._state["activity_choice_context"] = None
+        self._state["activity_choice_attempts"] = 0
+        self._state["active_activity"] = None
+        self.difference_game.reset()
+        self._sync_game_state()
         self._state.pop("active_invitation", None)
         self._state.pop("active_name_question", None)
         self._state.pop("ask_name_unclear_count", None)
         self._state.pop("active_continue_check", None)
         self._state.pop("pending_goodbye_kind", None)
         self._state.pop("skip_conversation_opening", None)
+        self._state.pop("babbel_transition", None)
+        self._state.pop("continue_same_topic", None)
+        self._state.pop("game_has_started", None)
+        self._state.pop("game_target_offer_done", None)
+        self._state.pop("pending_requested_activity", None)
+        self._state.pop("requested_babbel_topic", None)
+        self._state.pop("active_activity_question", None)
 
     def _handle_standby(
         self,
@@ -530,8 +719,15 @@ class ConversationEngine:
         if not is_wake_greeting(visitor_text):
             return
         self._clear_visitor_session()
+        if self._activities_enabled:
+            requested_activity = obvious_activity_request(visitor_text)
+            if requested_activity is not None:
+                self._state["pending_requested_activity"] = requested_activity
         diagnostics.append("[STANDBY] Greeting recognized")
-        self._set_phase("INVITATION", diagnostics)
+        self._set_phase(
+            "INTRODUCTION" if self._activities_enabled else "INVITATION",
+            diagnostics,
+        )
 
     def _handle_invitation(
         self,
@@ -618,6 +814,23 @@ class ConversationEngine:
             diagnostics.append("[INTENT] STOP")
             self._begin_goodbye("decline", diagnostics)
             return
+
+        if self._activities_enabled:
+            requested_activity = obvious_activity_request(visitor_text)
+            if requested_activity is not None:
+                names_self = re.search(
+                    r"\b(?:ik heet|mijn naam is|noem mij|noemt u mij)\b",
+                    normalize_for_matching(visitor_text),
+                )
+                if names_self:
+                    self._state["pending_requested_activity"] = requested_activity
+                else:
+                    diagnostics.append(f"[ACTIVITY] {requested_activity}")
+                    utterances.append("Dat is prima; uw naam hoeft u niet te noemen.")
+                    self._state["pending_name_confirmation"] = None
+                    self._state.pop("ask_name_unclear_count", None)
+                    self._start_activity(requested_activity, diagnostics)
+                    return
 
         pending_name = self._state.get("pending_name_confirmation")
         if pending_name:
@@ -748,12 +961,547 @@ class ConversationEngine:
         self._state.pop("active_name_question", None)
         self._state["pending_name_confirmation"] = None
         initial_message = self._state.pop("pending_initial_message", None)
+        if self._activities_enabled:
+            requested_activity = self._state.pop("pending_requested_activity", None)
+            if requested_activity is not None:
+                diagnostics.append(f"[ACTIVITY] {requested_activity}")
+                self._start_activity(requested_activity, diagnostics)
+                return
+            self._set_phase("DAILY_CHECKIN", diagnostics)
+            return
         if initial_message:
             self._state["skip_conversation_opening"] = True
             self._set_phase("CONVERSATION", diagnostics)
             self._handle_conversation(initial_message, utterances, diagnostics)
             return
         self._set_phase("CONVERSATION", diagnostics)
+
+    # ------------------------------------------------------------------
+    # ARI v0.4 visitor experience
+
+    def _enter_daily_checkin(self, utterances: list[str]) -> None:
+        if self._state.get("daily_checkin_step") is not None:
+            return
+        self._state["daily_checkin_step"] = "WELLBEING"
+        question = choose_nonrepeating_response(
+            self._state,
+            "last_daily_wellbeing_question",
+            prompts.DAILY_WELLBEING_QUESTIONS,
+        )
+        utterances.append(question)
+        self._append_history("ari", question)
+
+    def _handle_daily_checkin(
+        self,
+        visitor_text: str,
+        utterances: list[str],
+        diagnostics: list[str],
+    ) -> None:
+        if is_explicit_stop_request(visitor_text):
+            diagnostics.append("[INTENT] STOP")
+            self._begin_goodbye("conversation", diagnostics)
+            return
+
+        requested_activity = obvious_activity_request(visitor_text)
+        if requested_activity is not None:
+            self._append_history("visitor", visitor_text)
+            diagnostics.append(f"[ACTIVITY] {requested_activity}")
+            self._start_activity(requested_activity, diagnostics)
+            return
+
+        if not visitor_text:
+            utterances.append(prompts.EMPTY_INPUT_RESPONSE)
+            return
+
+        parsed = self._classify_daily_checkin(visitor_text, diagnostics)
+        intent = parsed.get("intent") if parsed else "UNCLEAR"
+        if intent == "STOP":
+            diagnostics.append("[INTENT] STOP")
+            self._begin_goodbye("conversation", diagnostics)
+            return
+        if intent == "URGENT":
+            diagnostics.append("[INTENT] URGENT")
+            utterances.append(prompts.URGENT_FALLBACK)
+            self._clear_visitor_session()
+            self._set_phase("STANDBY", diagnostics)
+            return
+        if intent in {"BABBEL", "GAME"}:
+            self._append_history("visitor", visitor_text)
+            diagnostics.append(f"[ACTIVITY] {intent}")
+            self._start_activity(intent, diagnostics)
+            return
+        if intent == "UNCLEAR":
+            reply = (
+                "Pardon, ik heb u niet goed verstaan. "
+                "Wilt u het nog eens rustig zeggen?"
+            )
+            utterances.append(reply)
+            self._remember_exchange(visitor_text, reply)
+            return
+
+        reply = _clean_spoken_reply(parsed.get("reply") if parsed else None)
+        reply = _without_spoken_questions(reply or "") or (
+            "Dank u dat u dat vertelt."
+        )
+        utterances.append(reply)
+        self._remember_exchange(visitor_text, reply)
+
+        step = self._state.get("daily_checkin_step")
+        plans_mentioned = bool(parsed and parsed.get("plans_mentioned"))
+        if (
+            step == "WELLBEING"
+            and intent == "NORMAL"
+            and not plans_mentioned
+        ):
+            self._state["daily_checkin_step"] = "PLANS"
+            question = choose_nonrepeating_response(
+                self._state,
+                "last_daily_plans_question",
+                prompts.DAILY_PLANS_QUESTIONS,
+            )
+            utterances.append(question)
+            self._append_history("ari", question)
+            return
+
+        # A plan was already supplied, the plans question was answered, or the
+        # visitor preferred not to discuss the check-in.  Do not ask again.
+        self._state["daily_checkin_step"] = "DONE"
+        self._state["activity_choice_context"] = "initial"
+        self._set_phase("ACTIVITY_CHOICE", diagnostics)
+
+    def _classify_daily_checkin(
+        self,
+        visitor_text: str,
+        diagnostics: list[str],
+    ) -> dict[str, Any] | None:
+        try:
+            result = self.llm.prompt(
+                f"{prompts.DAILY_CHECKIN_INSTRUCTIONS}\n\n"
+                f"STAP: {self._state.get('daily_checkin_step')}\n"
+                f"GESPREK TOT NU TOE:\n{self._history_for_prompt()}\n\n"
+                f"BEZOEKER: {visitor_text}",
+                max_tokens=110,
+                temperature=0.2,
+            )
+        except Exception:
+            diagnostics.append("[LLM] Daily check-in unavailable")
+            return None
+
+        parsed = _extract_json_object(result)
+        allowed = {"intent", "reply", "plans_mentioned"}
+        intents = {
+            "NORMAL",
+            "UNCOMFORTABLE",
+            "DISTRESS",
+            "URGENT",
+            "BABBEL",
+            "GAME",
+            "STOP",
+            "UNCLEAR",
+        }
+        if (
+            parsed is None
+            or set(parsed) != allowed
+            or parsed.get("intent") not in intents
+            or not isinstance(parsed.get("plans_mentioned"), bool)
+        ):
+            diagnostics.append("[LLM] Malformed daily check-in response")
+            return None
+        return parsed
+
+    def _enter_activity_choice(self, utterances: list[str]) -> None:
+        context = self._state.get("activity_choice_context") or "initial"
+        if context == "after_babbel":
+            choices = prompts.BABBEL_BOUNDARY_QUESTIONS
+        elif context == "after_game":
+            choices = prompts.GAME_BOUNDARY_QUESTIONS
+        elif context in {"game_complete", "game_stopped"}:
+            choices = prompts.GAME_FINISHED_QUESTIONS
+        elif context == "game_unavailable":
+            choices = prompts.GAME_UNAVAILABLE_CHOICE_QUESTIONS
+        else:
+            choices = prompts.ACTIVITY_CHOICE_QUESTIONS
+        question = choose_nonrepeating_response(
+            self._state,
+            f"last_activity_choice_{context}",
+            choices,
+        )
+        if context == "after_game":
+            remaining = self.difference_game.next_target_count - self.difference_game.score
+            question = question.format(remaining=remaining)
+        self._state["active_activity_question"] = question
+        utterances.append(question)
+        self._append_history("ari", question)
+
+    def _handle_activity_choice(
+        self,
+        visitor_text: str,
+        utterances: list[str],
+        diagnostics: list[str],
+    ) -> None:
+        if is_explicit_stop_request(visitor_text):
+            diagnostics.append("[INTENT] STOP")
+            self._begin_goodbye("conversation", diagnostics)
+            return
+        if not visitor_text:
+            utterances.append(prompts.ACTIVITY_CHOICE_CLARIFICATION)
+            return
+
+        requested = obvious_activity_request(visitor_text)
+        binary = classify_simple_binary_response(visitor_text)
+        context = self._state.get("activity_choice_context")
+        normalized = normalize_for_matching(visitor_text)
+        if requested == "BABBEL" and re.search(
+            r"\b(?:hetzelfde|zelfde|hierover|daarover|dit onderwerp)\b", normalized
+        ):
+            decision = {"activity": "BABBEL", "same_topic": True, "topic": None}
+        elif requested == "BABBEL" and " over " in f" {normalized} ":
+            decision = self._classify_activity_choice(visitor_text, diagnostics)
+        elif requested is not None:
+            decision = {
+                "activity": requested,
+                "same_topic": False,
+                "topic": None,
+            }
+        elif binary is not None and context == "after_game":
+            if binary == "YES":
+                decision = {"activity": "GAME", "same_topic": False, "topic": None}
+            else:
+                self._state["activity_choice_context"] = "game_stopped"
+                self._enter_activity_choice(utterances)
+                return
+        elif binary is not None and context in {"game_complete", "game_stopped"}:
+            decision = {
+                "activity": "BABBEL" if binary == "YES" else "STOP",
+                "same_topic": False,
+                "topic": None,
+            }
+        elif binary is not None:
+            # A yes/no answer cannot select one of two or three options.
+            decision = None
+        else:
+            decision = self._classify_activity_choice(visitor_text, diagnostics)
+
+        label = decision.get("activity") if decision else "UNCLEAR"
+        diagnostics.append(f"[ACTIVITY] {label}")
+        if label == "URGENT":
+            utterances.append(prompts.URGENT_FALLBACK)
+            self._clear_visitor_session()
+            self._set_phase("STANDBY", diagnostics)
+            return
+        if label in {"STOP", "DECLINE"}:
+            self._begin_goodbye(
+                "decline" if label == "DECLINE" else "conversation",
+                diagnostics,
+            )
+            return
+        if label == "CHOOSE_FOR_ME":
+            game_can_be_chosen = (
+                self.difference_game.ready
+                and not self.difference_game.all_found
+                and self._state.get("activity_choice_context") != "game_unavailable"
+            )
+            label = random.choice(("BABBEL", "GAME")) if game_can_be_chosen else "BABBEL"
+            diagnostics.append(f"[ACTIVITY] CHOSEN_{label}")
+        if label in {"BABBEL", "GAME"}:
+            self._state["activity_choice_attempts"] = 0
+            self._append_history("visitor", visitor_text)
+            if label == "BABBEL":
+                same_topic = bool(decision and decision.get("same_topic"))
+                requested_topic = _clean_topic(decision.get("topic")) if decision else None
+                self._state["continue_same_topic"] = same_topic
+                self._state["requested_babbel_topic"] = requested_topic
+            self._start_activity(label, diagnostics)
+            return
+
+        self._state["activity_choice_attempts"] += 1
+        utterances.append(prompts.ACTIVITY_CHOICE_CLARIFICATION)
+        self._remember_exchange(visitor_text, prompts.ACTIVITY_CHOICE_CLARIFICATION)
+
+    def _classify_activity_choice(
+        self,
+        visitor_text: str,
+        diagnostics: list[str],
+    ) -> dict[str, Any] | None:
+        try:
+            result = self.llm.prompt(
+                f"{prompts.ACTIVITY_CHOICE_INSTRUCTIONS}\n\n"
+                f"CONTEXT: {self._state.get('activity_choice_context')}\n"
+                f"HUIDIG ONDERWERP: {self._state.get('current_topic')}\n"
+                f"VRAAG VAN ARI: {self._state.get('active_activity_question')!r}\n"
+                f"BEZOEKER: {visitor_text!r}",
+                max_tokens=75,
+                temperature=0.0,
+            )
+        except Exception:
+            diagnostics.append("[LLM] Activity classifier unavailable")
+            return None
+        parsed = _extract_json_object(result)
+        labels = {
+            "BABBEL",
+            "GAME",
+            "CHOOSE_FOR_ME",
+            "STOP",
+            "DECLINE",
+            "URGENT",
+            "UNCLEAR",
+        }
+        if (
+            parsed is None
+            or set(parsed) != {"activity", "same_topic", "topic"}
+            or parsed.get("activity") not in labels
+            or not isinstance(parsed.get("same_topic"), bool)
+            or (
+                parsed.get("topic") is not None
+                and not isinstance(parsed.get("topic"), str)
+            )
+        ):
+            diagnostics.append("[LLM] Malformed activity response")
+            return None
+        if parsed["activity"] != "BABBEL":
+            parsed["same_topic"] = False
+            parsed["topic"] = None
+        return parsed
+
+    def _start_activity(self, activity: str, diagnostics: list[str]) -> None:
+        if activity == "BABBEL":
+            previous = self._state.get("active_activity")
+            self._state["active_activity"] = "GEZELLIG_BABBELEN"
+            self._state["activity_choice_context"] = None
+            self._state["babbel_transition"] = (
+                "Natuurlijk, dan praten we gezellig verder."
+                if previous == "ZOEK_DE_VERSCHILLEN"
+                else "Graag, dan gaan we gezellig babbelen."
+            )
+            self._set_phase("GEZELLIG_BABBELEN", diagnostics)
+            return
+        if activity == "GAME":
+            if self.difference_game.all_found:
+                self._state["activity_choice_context"] = "game_complete"
+                self._set_phase("ACTIVITY_CHOICE", diagnostics)
+                return
+            if self.difference_game.target_reached:
+                self.difference_game.advance_round()
+                self._sync_game_state()
+            self._state["active_activity"] = "ZOEK_DE_VERSCHILLEN"
+            self._state["activity_choice_context"] = None
+            self._set_phase("ZOEK_DE_VERSCHILLEN", diagnostics)
+            return
+        raise ValueError(f"Unknown activity: {activity}")
+
+    def _enter_babbel(
+        self,
+        utterances: list[str],
+        diagnostics: list[str],
+    ) -> None:
+        transition = self._state.pop("babbel_transition", None)
+        if transition:
+            utterances.append(transition)
+            self._append_history("ari", transition)
+
+        same_topic = bool(self._state.pop("continue_same_topic", False))
+        requested_topic = self._state.pop("requested_babbel_topic", None)
+        if same_topic and self._state.get("current_topic"):
+            topic = self._state["current_topic"]
+        else:
+            topic = requested_topic or self._choose_new_topic()
+        self._start_topic(topic, diagnostics)
+        self._state["continue_same_topic"] = same_topic
+        opening = self._generate_topic_opening(diagnostics)
+        if opening is None:
+            opening = f"Laten we het over {topic} hebben. Wat komt er als eerste bij u op?"
+        utterances.append(opening)
+        self._append_history("ari", opening)
+        if _contains_spoken_question(opening):
+            self._state["topic_question_count"] += 1
+
+    def _handle_babbel(
+        self,
+        visitor_text: str,
+        utterances: list[str],
+        diagnostics: list[str],
+    ) -> None:
+        if is_explicit_stop_request(visitor_text):
+            diagnostics.append("[INTENT] STOP")
+            self._begin_goodbye("conversation", diagnostics)
+            return
+        if obvious_activity_request(visitor_text) == "GAME":
+            self._append_history("visitor", visitor_text)
+            diagnostics.append("[ACTIVITY] GAME")
+            self._start_activity("GAME", diagnostics)
+            return
+        self._handle_conversation(visitor_text, utterances, diagnostics)
+
+    def _enter_difference_game(
+        self,
+        utterances: list[str],
+        diagnostics: list[str],
+    ) -> None:
+        self._sync_game_state()
+        if not self.difference_game.ready:
+            utterances.append(prompts.GAME_UNAVAILABLE)
+            self._append_history("ari", prompts.GAME_UNAVAILABLE)
+            self._state["active_activity"] = None
+            self._state["activity_choice_context"] = "game_unavailable"
+            self._set_phase("ACTIVITY_CHOICE", diagnostics)
+            return
+
+        if self._state.get("game_has_started"):
+            introduction = "Prima, dan zoeken we verder. Ziet u nog een verschil?"
+        else:
+            introduction = choose_nonrepeating_response(
+                self._state,
+                "last_game_introduction",
+                prompts.GAME_INTRODUCTIONS,
+            )
+            self._state["game_has_started"] = True
+        utterances.append(introduction)
+        self._append_history("ari", introduction)
+
+    def _handle_difference_game(
+        self,
+        visitor_text: str,
+        utterances: list[str],
+        diagnostics: list[str],
+    ) -> None:
+        normalized = normalize_for_matching(visitor_text)
+        if re.search(r"\b(?:stoppen met|genoeg van) (?:dit |het )?spel(?:letje)?\b", normalized):
+            self._state["activity_choice_context"] = "game_stopped"
+            utterances.append("Natuurlijk, we kunnen het spel hierbij laten.")
+            self._set_phase("ACTIVITY_CHOICE", diagnostics)
+            return
+        if is_explicit_stop_request(visitor_text):
+            diagnostics.append("[INTENT] STOP")
+            self._begin_goodbye("conversation", diagnostics)
+            return
+        if obvious_activity_request(visitor_text) == "BABBEL":
+            self._append_history("visitor", visitor_text)
+            diagnostics.append("[ACTIVITY] BABBEL")
+            self._start_activity("BABBEL", diagnostics)
+            return
+        if not visitor_text:
+            utterances.append(prompts.EMPTY_INPUT_RESPONSE)
+            return
+        if not self.difference_game.ready:
+            utterances.append(prompts.GAME_UNAVAILABLE)
+            self._state["activity_choice_context"] = "game_unavailable"
+            self._set_phase("ACTIVITY_CHOICE", diagnostics)
+            return
+
+        if any(phrase in normalized for phrase in (
+            "ik weet het niet", "geen idee", "ik zie het niet", "ik kan niets vinden",
+            "ik zie geen verschil", "ik weet geen verschil", "een hint", "help",
+        )) or normalized in {"hint", "weet ik niet", "weet niet", "hulp"}:
+            self._give_game_hint(visitor_text, utterances, diagnostics)
+            return
+
+        if self.difference_game.needs_side_clarification(visitor_text):
+            reply = "Wilt u het verschil met links en rechts beschrijven?"
+            utterances.append(reply)
+            self._remember_exchange(visitor_text, reply)
+            diagnostics.append("[GAME] PICTURE_LABELS_UNVERIFIED")
+            return
+
+        try:
+            raw = self.llm.prompt(
+                self.difference_game.interpretation_prompt(visitor_text),
+                max_tokens=1800,
+                temperature=0.0,
+            )
+        except Exception:
+            diagnostics.append("[LLM] Difference interpreter unavailable")
+            raw = None
+        intent = self.difference_game.response_intent(raw)
+        if intent == "STOP":
+            self._begin_goodbye("conversation", diagnostics)
+            return
+        if intent == "BABBEL":
+            self._append_history("visitor", visitor_text)
+            self._start_activity("BABBEL", diagnostics)
+            return
+        if intent == "URGENT":
+            utterances.append(prompts.URGENT_FALLBACK)
+            self._clear_visitor_session()
+            self._set_phase("STANDBY", diagnostics)
+            return
+        if intent == "DONT_KNOW":
+            self._give_game_hint(visitor_text, utterances, diagnostics)
+            return
+        result = self.difference_game.evaluate_llm_output(raw)
+        self._sync_game_state()
+
+        if result.status == "matched":
+            count = len(result.newly_found_ids)
+            if count == 1:
+                reply = choose_nonrepeating_response(
+                    self._state,
+                    "last_game_correct_response",
+                    prompts.GAME_CORRECT_RESPONSES,
+                )
+            else:
+                reply = f"Ja, dat zijn {count} verschillende goede vondsten."
+            diagnostics.append(f"[GAME] +{count} ({result.score}/{result.available_count})")
+            if result.all_found or result.target_reached:
+                if result.all_found:
+                    reply += " Daarmee hebben we alle beschikbare verschillen gevonden."
+                else:
+                    reply += f" We hebben er nu {result.score} gevonden."
+                utterances.append(reply)
+                self._remember_exchange(visitor_text, reply)
+                self._state["activity_choice_context"] = (
+                    "game_complete" if result.all_found else "after_game"
+                )
+                self._set_phase("ACTIVITY_CHOICE", diagnostics)
+                return
+            reply += " Ziet u nog een verschil?"
+        elif result.status == "already_found":
+            reply = choose_nonrepeating_response(
+                self._state,
+                "last_game_repeat_response",
+                prompts.GAME_REPEAT_RESPONSES,
+            )
+            diagnostics.append("[GAME] DUPLICATE")
+        else:
+            invalid_output = any(d.status == INVALID for d in result.decisions)
+            if not invalid_output and self.difference_game.record_mistake():
+                self._give_game_hint(visitor_text, utterances, diagnostics)
+                return
+            self._sync_game_state()
+            uncertain_output = invalid_output or any(
+                d.status == UNCERTAIN for d in result.decisions
+            )
+            reply = choose_nonrepeating_response(
+                self._state,
+                "last_game_clarification_response" if uncertain_output else "last_game_incorrect_response",
+                prompts.GAME_CLARIFICATION_RESPONSES if uncertain_output else prompts.GAME_INCORRECT_RESPONSES,
+            )
+            diagnostics.append("[GAME] UNVERIFIED")
+        utterances.append(reply)
+        self._remember_exchange(visitor_text, reply)
+
+    def _give_game_hint(
+        self,
+        visitor_text: str,
+        utterances: list[str],
+        diagnostics: list[str],
+    ) -> None:
+        reassurance = choose_nonrepeating_response(
+            self._state, "last_game_hint_reassurance", prompts.GAME_HINT_REASSURANCES
+        )
+        reply = f"{reassurance} {self.difference_game.next_hint()}"
+        diagnostics.append("[GAME] HINT")
+        utterances.append(reply)
+        self._remember_exchange(visitor_text, reply)
+        self._sync_game_state()
+
+    def _sync_game_state(self) -> None:
+        self._state["game_found_count"] = self.difference_game.score
+        self._state["game_target_count"] = self.difference_game.target_count
+        self._state["game_available_count"] = self.difference_game.available_count
+        self._state["game_target_reached"] = self.difference_game.target_reached
+        self._state["game_all_found"] = self.difference_game.all_found
+        self._state["game_found_ids"] = sorted(self.difference_game.found_ids)
+        self._state["game_mistakes_since_hint"] = self.difference_game.mistakes_since_hint
 
     def _handle_conversation(
         self,
@@ -865,7 +1613,11 @@ class ConversationEngine:
             and not asks_question
             and cycle_complete
         ):
-            self._set_phase("CONTINUE_CHECK", diagnostics)
+            if self._activities_enabled:
+                self._state["activity_choice_context"] = "after_babbel"
+                self._set_phase("ACTIVITY_CHOICE", diagnostics)
+            else:
+                self._set_phase("CONTINUE_CHECK", diagnostics)
 
     def _generate_conversation_response(
         self,
