@@ -43,11 +43,11 @@ DEPTH_TOPIC = "/torso_front_camera/depth/image_rect_raw"
 EMERGENCY_TOPIC = "/power/is_emergency"
 TABLET_TOPIC = "/web/go_to"
 
-# Fill these only after reading the internal page URIs from ARI's Touch Web
-# Manager.  The visible titles are not necessarily the ROS identifiers.  Empty
-# values deliberately disable publishing rather than guessing.
-TABLET_MAIN_PAGE_URI = ""
-TABLET_GAME_PAGE_URI = ""
+# Page identifiers shown beside the copy icons in ARI's Touch Web Manager
+# (Parlement project). Keep the exact spelling/case when pages are renamed.
+# Empty values deliberately disable publishing.
+TABLET_MAIN_PAGE_URI = "Main"
+TABLET_GAME_PAGE_URI = "Zoek_de_verschillen"
 
 FACE_ACQUIRE_SECONDS = 0.8
 FACE_LOSS_GRACE_SECONDS = 1.5

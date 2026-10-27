@@ -50,6 +50,27 @@ def bare_bridge():
 
 
 class EmoteTests(unittest.TestCase):
+    def test_configured_tablet_pages_publish_manager_identifiers(self):
+        class WebGoTo:
+            TOUCH_PAGE = 4
+
+        bridge = bare_bridge()
+        bridge._tablet_pub = MagicMock()
+        bridge._tablet_message_type = WebGoTo
+        bridge._tablet_page = None
+        bridge._tablet_error = None
+
+        self.assertTrue(bridge.set_tablet_page("Main"))
+        self.assertTrue(bridge.set_tablet_page("Zoek_de_verschillen"))
+        messages = [call.args[0] for call in bridge._tablet_pub.publish.call_args_list]
+        self.assertEqual([message.value for message in messages],
+                         ["Main", "Zoek_de_verschillen"])
+        self.assertTrue(all(message.type == message.TOUCH_PAGE for message in messages))
+
+        with patch("ari.ari_social_proxy.TABLET_GAME_PAGE_URI", ""):
+            self.assertFalse(bridge.set_tablet_page("Zoek_de_verschillen"))
+        self.assertEqual(bridge._tablet_pub.publish.call_count, 2)
+
     def test_real_emotes_parse_and_dance_has_no_linear_drive(self):
         emotes = load_emotes()
         self.assertTrue({"Dans", "Hallo", "Hoera", "Ja", "Nee", "Rondkijken", "Wiebelen"} <= set(emotes))

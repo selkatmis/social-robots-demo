@@ -121,6 +121,18 @@ Python also deduplicates matches and
 owns the score. Multiple verified differences in one utterance count once
 each. A deliberately empty dataset still disables scoring safely.
 
+The game introduction gives a concrete example: "Links zijn er twee bananen
+en rechts drie." This is an example, not a required sentence. A complete
+catalogued observation such as "Er mist een banaan" or "Ik zie ook dat er een
+banaan mist" is recognized locally before calling the LLM. The observed ASR
+variant "Er is een banaan meest" is accepted too. This uses whole observations,
+not banana keywords; negations, wrong counts and reversed sides do not take
+this shortcut. Other wording still uses the semantic interpreter and normal
+validation. Repeated descriptions of the bananas count only once.
+
+These are laptop-side conversation changes: restart `start_ari_demo.ps1`
+after saving them locally; redeploying the ROS sidecar is not needed.
+
 The initial milestone is three unique matches. Continuing raises the total
 target to eight (five more), and continuing again raises it to fifteen (seven
 more). The next target is capped by the available dataset, and progress is
@@ -146,9 +158,10 @@ Adjust `DEFAULT_TARGET_COUNT`, `ADDITIONAL_ROUND_COUNTS` (currently `5, 7`),
 PAL confirms that installed pages are selected by publishing
 `pal_web_msgs/WebGoTo` on `/web/go_to` with
 `type = WebGoTo.TOUCH_PAGE`. The visible project/page titles do not prove the
-internal URIs, so the local sidecar leaves both identifiers empty and refuses
-to publish until they are verified. It never guesses that `Main` or
-`Zoek_de_verschillen` is the URI.
+internal URIs. The supplied Touchscreen Manager screenshot shows `Main` and
+`Zoek_de_verschillen` in the identifier column beside the copy icons, under
+the Parlement project; the sidecar now uses those exact values. Physical
+navigation still needs a live check. Empty identifiers disable publishing.
 
 References: [PAL ARI touchscreen tutorial](https://docs.pal-robotics.com/ari/sdk/23.1/touchscreen/building-first-touchscreen-interaction.html),
 [PAL `/web/go_to` reference](https://docs.pal-robotics.com/sdk/23.12/topics/web-go_to.html),
@@ -176,8 +189,8 @@ After confirming the two page URIs, place them at the beginning of
 `ari/ari_social_proxy.py`:
 
 ```python
-TABLET_MAIN_PAGE_URI = "verified-main-page-uri"
-TABLET_GAME_PAGE_URI = "verified-game-page-uri"
+TABLET_MAIN_PAGE_URI = "Main"
+TABLET_GAME_PAGE_URI = "Zoek_de_verschillen"
 ```
 
 Do not put display names there unless the live output proves they are the

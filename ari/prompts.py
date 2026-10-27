@@ -145,12 +145,12 @@ GAME_UNAVAILABLE_CHOICE_QUESTIONS = (
 
 GAME_INTRODUCTIONS = (
     (
-        "Dan gaan we zoek de verschillen doen. U ziet twee plaatjes naast elkaar. "
-        "Vertelt u wat u anders ziet."
+        "Dan gaan we zoek de verschillen doen. U kunt bijvoorbeeld zeggen: "
+        "links zijn er twee bananen en rechts drie."
     ),
     (
-        "Laten we zoek de verschillen spelen. Bekijk beide plaatjes en noem "
-        "gerust een verschil."
+        "Bekijk beide plaatjes en vertel wat u anders ziet. Zeg bijvoorbeeld: "
+        "links liggen twee bananen en rechts drie."
     ),
 )
 
