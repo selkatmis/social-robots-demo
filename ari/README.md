@@ -95,9 +95,10 @@ Adjust `DEFAULT_TARGET_COUNT`, `ADDITIONAL_ROUND_COUNTS` (currently `5, 7`),
 PAL confirms that installed pages are selected by publishing
 `pal_web_msgs/WebGoTo` on `/web/go_to` with
 `type = WebGoTo.TOUCH_PAGE`. The visible project/page titles do not prove the
-internal URIs, so the local sidecar leaves both identifiers empty and refuses
-to publish until they are verified. It never guesses that `Main` or
-`Zoek_de_verschillen` is the URI.
+internal URIs. The supplied Touchscreen Manager screenshot shows `Main` and
+`Zoek_de_verschillen` in the identifier column beside the copy icons, under
+the Parlement project; the sidecar now uses those exact values. Physical
+navigation still needs a live check. Empty identifiers disable publishing.
 
 References: [PAL ARI touchscreen tutorial](https://docs.pal-robotics.com/ari/sdk/23.1/touchscreen/building-first-touchscreen-interaction.html),
 [PAL `/web/go_to` reference](https://docs.pal-robotics.com/sdk/23.12/topics/web-go_to.html),
@@ -125,8 +126,8 @@ After confirming the two page URIs, place them at the beginning of
 `ari/ari_social_proxy.py`:
 
 ```python
-TABLET_MAIN_PAGE_URI = "verified-main-page-uri"
-TABLET_GAME_PAGE_URI = "verified-game-page-uri"
+TABLET_MAIN_PAGE_URI = "Main"
+TABLET_GAME_PAGE_URI = "Zoek_de_verschillen"
 ```
 
 Do not put display names there unless the live output proves they are the
