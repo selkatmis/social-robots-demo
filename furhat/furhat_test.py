@@ -17,7 +17,7 @@ from shared.llm import LLM
 
 LANGUAGE = "nl-NL"
 VOICE = "Harper:MAI-Voice-2.1-Flash"
-HINTS = ["Furhat", "FOAF", "ARI", "QT", "Q-T", "cutie", "Alice", "Nieuwspoort", "VU"]
+HINTS = ["Furhat", "FOAF", "ARI", "Kjoetie", "Alice", "Nieuwspoort", "VU"]
 END_SPEECH_TIMEOUT = 1.0  
 NEW_VISITOR_AFTER = 3     
 
@@ -25,8 +25,8 @@ NEW_VISITOR_AFTER = 3
 GAZE_Y_OFFSET = -0.18
 
 GREETING = (
-    "[HAPPY] Hallo! Ik ben Furhat, de centrale informatie-robot van dit onderzoeksproject. "
-    "Ik vertel u graag over onze sociale robots Ari, cutie en mijzelf, of over ons wetenschappelijk onderzoek. "
+    "[HAPPY] Hallo! Ik ben Flynn, de centrale informatie-robot van dit onderzoeksproject. "
+    "Ik vertel u graag over onze sociale robots Ari, Kjoetie en mijzelf, of over ons wetenschappelijk onderzoek. "
     "Waar wilt u meer over weten?"
 )
 FALLBACK_RETRY = "[CONFUSED] Sorry, ik heb u niet helemaal goed verstaan. Kunt u uw vraag nog eens op een andere manier stellen?"
@@ -199,23 +199,24 @@ def build_system_prompt():
     papers_text = load_text_file("papers_nl.txt")
     robot_descriptions = load_text_file("info_robot.txt")
     return (
-        "Je bent Furhat, de vriendelijke en centrale informatie-robot van dit onderzoeksproject over sociale robots.\n"
-        "Jouw doel is om bezoekers helder en concreet te informeren over onze drie sociale robots (Ari, Q-T en jezelf) "
+        "Je bent Flynn, de vriendelijke en centrale informatie-robot van dit onderzoeksproject over sociale robots.\n"
+        "Jouw doel is om bezoekers helder en concreet te informeren over onze drie sociale robots (Ari, Kjoetie en jezelf) "
         "en over ons wetenschappelijk onderzoek naar mens-robotinteractie.\n\n"
         "BELANGRIJKE GEDRAGSREGELS:\n"
         "1. Spreek altijd in het Nederlands, in de eerste persoon ('ik'), en spreek ALLEEN de menselijke bezoeker aan (met 'u' of 'je').\n"
-        "2. SPREEK NOOIT TEGEN DE ANDERE ROBOTS: Praat over Ari en Q-T uitsluitend in de derde persoon tegen de bezoeker "
-        "(zeg dus NOOIT dingen tegen Ari of Q-T zelf, maar zeg tegen de bezoeker bijv.: 'Heeft u de demo van Ari al geprobeerd?').\n"
-        "3. Antwoord ALTIJD in maximaal 2 korte zinnen (hooguit 30 woorden) in gewone spreektaal. Geen emojis, geen opsommingen, geen markdown.\n"
-        "4. Begin je antwoord NOOIT met een nieuwe introductie zoals 'Ik ben Furhat', want je hebt jezelf al voorgesteld bij de start.\n"
+        "2. SPREEK NOOIT TEGEN DE ANDERE ROBOTS: Praat over Ari en Kjoetie uitsluitend in de derde persoon tegen de bezoeker "
+        "(zeg dus NOOIT dingen tegen Ari of Kjoetie zelf, maar zeg tegen de bezoeker bijv.: 'Heeft u de demo van Ari al geprobeerd?').\n"
+        "3. Antwoord ALTIJD in maximaal 3 korte zinnen (hooguit 50 woorden) in gewone spreektaal. Geen emojis, geen opsommingen, geen markdown.\n"
+        "4. Begin je antwoord NOOIT met een nieuwe introductie zoals 'Ik ben Flynn', want je hebt jezelf al voorgesteld bij de start.\n"
         "5. GEEN INTERNET OF ONLINE ZOEKEN: Je kunt en mag geen dingen online opzoeken of op internet rondkijken. Als de bezoeker vraagt om iets online op te zoeken, "
         "of naar recente gebeurtenissen/nieuws vraagt, verontschuldig je dan dat je dat niet kunt doen, en vraag de bezoeker om een andere vraag te stellen over de robots of het onderzoek.\n"
-        "6. STRIKTE FOCUS OP ÉÉN ROBOT: Als de bezoeker specifiek naar Ari vraagt, vertel dan ALLEEN over Ari en noem Q-T of jezelf NIET. "
-        "Als de bezoeker specifiek naar Q-T vraagt, vertel dan ALLEEN over Q-T en noem Ari of jezelf NIET. "
-        "Als de bezoeker specifiek naar jou (Furhat) vraagt, vertel dan ALLEEN over jezelf.\n"
-        "7. DEMO VRAAG AAN DE BEZOEKER: Als de bezoeker specifiek naar Ari of Q-T vraagt, vraag dan aan de bezoeker of hij/zij de demo van die robot al heeft geprobeerd. "
+        "6. STRIKTE FOCUS OP ÉÉN ROBOT: Als de bezoeker specifiek naar Ari vraagt, vertel dan ALLEEN over Ari en noem Kjoetie of jezelf NIET. "
+        "Als de bezoeker specifiek naar Kjoetie vraagt, vertel dan ALLEEN over Kjoetie en noem Ari of jezelf NIET. "
+        "Als de bezoeker specifiek naar jou (Flynn) vraagt, vertel dan ALLEEN over jezelf.\n"
+        "7. STEL VOOR OM EEN DEMO TE BEZOEKEN: Alleen als de bezoeker specifiek naar Ari of Kjoetie vraagt, vraag dan aan de bezoeker of hij/zij de demo van die robot al heeft geprobeerd. "
         "Als de bezoeker daarop 'nee' antwoordt, stel dan aan de bezoeker voor om even naar die robot toe te lopen en de demo zelf uit te proberen! "
-        "(Vraag dit NOOIT over jezelf/Furhat, want de bezoeker praat al met jou).\n"
+        "Als de bezoeker nog niet naar een andere robot heeft gevraagd, vraag dan aan de bezoeker of hij/zij de demo van Ari of Kjoetie wil proberen. "
+        "(Vraag dit NOOIT over jezelf/Flynn, want de bezoeker praat al met jou).\n"
         "8. ONDUIDELIJK OF BUITEN SCOPE: Als een vraag totaal onbegrijpelijk is of helemaal niets met robots, onderwijs, zorg of dit project te maken heeft, "
         "zet dan exact het label [ONDUIDELIJK] aan het begin van je antwoord.\n"
         "9. GEZICHTSUITDRUKKING: Begin elk normaal antwoord met precies één label voor je gezichtsuitdrukking: "
@@ -229,9 +230,9 @@ def build_system_prompt():
 def normalize_speech(text):
     """Normalizes common speech-to-text misrecognitions for the robot names."""
     cleaned = text.strip()
-    cleaned = re.sub(r"\b(cutie\s*robot|cutie|q\s*t\s*robot|qtrobot|qt)\b", "Q-T", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(cutie\s*robot|cutie|q\s*t\s*robot|qtrobot|qt)\b", "Kjoetie", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\b(arie|ari\s*robot|ali)\b", "Ari", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\b(voorhout|farhad|ferhat|fur\s*hat)\b", "Furhat", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(voorhout|farhad|ferhat|fur\s*hat)\b", "Flynn", cleaned, flags=re.IGNORECASE)
     return cleaned
 
 
@@ -245,17 +246,17 @@ def detect_specific_robot_instruction(user_input):
     if asks_ari and not asks_qt:
         return (
             " (Instructie: De bezoeker vraagt specifiek naar Ari. Vertel ALLEEN over Ari in de derde persoon, "
-            "noem Q-T of jezelf NIET, spreek de robot Ari NIET direct aan, en vraag aan de bezoeker: 'Heeft u de demo bij Ari al geprobeerd?')"
+            "noem Kjoetie of jezelf NIET, spreek de robot Ari NIET direct aan, en vraag aan de bezoeker: 'Heeft u de demo bij Ari al geprobeerd?')"
         )
     if asks_qt and not asks_ari:
         return (
-            " (Instructie: De bezoeker vraagt specifiek naar Q-T. Vertel ALLEEN over Q-T voor studenten met leerstoornissen in de derde persoon, "
-            "noem Ari of jezelf NIET, spreek de robot Q-T NIET direct aan, en vraag aan de bezoeker: 'Heeft u de demo bij Q-T al geprobeerd?')"
+            " (Instructie: De bezoeker vraagt specifiek naar Kjoetie. Vertel ALLEEN over Kjoetie voor studenten met leerstoornissen in de derde persoon, "
+            "noem Ari of jezelf NIET, spreek de robot Q-T NIET direct aan, en vraag aan de bezoeker: 'Heeft u de demo bij Kjoetie al geprobeerd?')"
         )
     if asks_furhat and not asks_ari and not asks_qt:
         return (
-            " (Instructie: De bezoeker vraagt specifiek naar jou, Furhat. Vertel in de eerste persoon ALLEEN over jezelf, "
-            "noem Ari of Q-T NIET, en vraag NIET naar een demo.)"
+            " (Instructie: De bezoeker vraagt specifiek naar jou, Flynn. Vertel in de eerste persoon ALLEEN over jezelf, "
+            "noem Ari of Kjoetie NIET, en vraag NIET naar een demo.)"
         )
     if re.search(r"\b(nee|nog niet|niet gedaan|no)\b", lower):
         return (
