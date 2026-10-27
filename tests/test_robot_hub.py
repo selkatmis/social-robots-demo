@@ -8,8 +8,14 @@ from unittest.mock import MagicMock, patch
 
 from hub.server import (
     ARI_ACTIONS, HERE, LOG_LINES, MAX_LOG_LINE_CHARACTERS,
-    AriLink, RobotManager, create_app, make_robots,
+    AriLink, Hub, Peers, RobotManager, create_app, make_robots,
 )
+
+
+def make_app(manager, ari, urls=()):
+    """A hub with no other laptops, so every request is handled here."""
+    identity = {"id": "hub-test", "name": "test", "port": 8080}
+    return create_app(Hub(identity, manager, ari, Peers(identity)), list(urls))
 
 
 class HubTests(unittest.TestCase):
@@ -117,23 +123,32 @@ class HubTests(unittest.TestCase):
         manager, ari = self.manager(), MagicMock()
         ari.state = {"phase": "ZOEK_DE_VERSCHILLEN", "game_found_count": 3, "game_target_count": 8}
         ari.forward.return_value = ({"ok": True}, 200)
-        client = create_app(manager, ari, ["http://mock:8080"]).test_client()
-        for action in ("handshake", "guardian", "alert/ack", "arbitrary/path"):
+        client = make_app(manager, ari, ["http://mock:8080"]).test_client()
+        for action in ("guardian", "mode", "arbitrary/path"):
             self.assertEqual(client.post("/api/ari/" + action, json={}).status_code, 404)
         self.assertEqual(client.post("/api/ari/say", json=[]).status_code, 400)
         self.assertEqual(client.post("/api/ari/say", data="form").status_code, 415)
         self.assertEqual(client.get("/api/ari/stop").status_code, 405)
         ari.forward.assert_not_called()
         self.assertEqual(client.post("/api/ari/say", json={"text": "Hallo"}).status_code, 200)
-        ari.forward.assert_called_once_with("say", "POST", {"text": "Hallo"})
+        ari.forward.assert_called_once_with("say", "POST", {"text": "Hallo"}, 3.0)
         self.assertEqual(client.get("/api/state").get_json()["ari"]["game_found_count"], 3)
+        # The VUmc guide's handshake and staff alert reach ARI as well.
+        for action in ("handshake", "alert/ack"):
+            self.assertEqual(client.post("/api/ari/" + action, json={}).status_code, 200)
+            ari.forward.assert_called_with(action, "POST", {}, 3.0)
 
     def test_browser_payload_cannot_override_launch_command(self):
         manager, ari = self.manager(), MagicMock()
-        client = create_app(manager, ari, []).test_client()
+        ari.state = None
+        client = make_app(manager, ari).test_client()
         with patch.object(manager, "start", return_value=(True, None)) as start:
             client.post("/api/robots/ari/start", json={"command": "unexpected", "mode": "guardian"})
-            start.assert_called_once_with("ari")
+            start.assert_called_once_with("ari", {"ARI_MODE": "guardian"})
+        # Only the two known conversations can be picked; anything else is ignored.
+        with patch.object(manager, "start", return_value=(True, None)) as start:
+            client.post("/api/robots/ari/start", json={"mode": "--evil"})
+            start.assert_called_once_with("ari", {})
 
     def test_upstream_errors_keep_their_http_status(self):
         with patch("hub.server.requests.Session") as factory:
@@ -144,13 +159,14 @@ class HubTests(unittest.TestCase):
         self.assertEqual(status, 409)
         self.assertFalse(data["ok"])
 
-    def test_webpage_contains_selected_controls_without_unselected_modes(self):
+    def test_webpage_offers_both_conversations_and_their_controls(self):
         text = (HERE / "page.html").read_text(encoding="utf-8")
-        for forbidden in ("guardian", "VUmc", "handshake", "alert/ack", "data-mode"):
-            self.assertNotIn(forbidden, text)
-        for expected in ("sayForm", "greet", "dance", "volume", "stopAll", "game_found_count", "250"):
+        for expected in ("sayForm", "greet", "dance", "volume", "stopAll", "game_found_count", "250",
+                         'data-mode="guardian"', 'data-mode="companion"', "handshake", "alert/ack"):
             self.assertIn(expected, text)
-        self.assertNotIn("handshake", ARI_ACTIONS)
+        self.assertTrue({"handshake", "alert/ack"} <= ARI_ACTIONS)
+        for asset in ("icon.png", "fonts/ubuntu-400.woff2", "fonts/ubuntu-500.woff2", "fonts/ubuntu-700.woff2"):
+            self.assertTrue((HERE / "static" / asset).is_file(), asset)
 
 
 if __name__ == "__main__":

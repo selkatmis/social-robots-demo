@@ -6,6 +6,7 @@ import json
 import math
 import re
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,10 @@ EMOTES_FILE = Path(__file__).with_name("emotes.json")
 GESTURES = {
     "wave": Gesture.WAVE, "nod": Gesture.NOD,
     "cheer": Gesture.CHEER, "farewell": Gesture.FAREWELL,
+    "greet": Gesture.GREET,
 }
+# The conversation names the whole exchange; the arm motion behind it is greet.
+GESTURE_ALIASES = {"handshake": "greet"}
 EXPRESSIONS = {
     "happy", "excited", "neutral", "sad", "surprised",
     "thinking", "confused", "shy", "angry",
@@ -26,6 +30,13 @@ MAX_SCRIPT_CHARACTERS = 12000
 MAX_SPOKEN_CHARACTERS = 400
 MAX_WAIT_SECONDS = 10.0
 EMOTE_EXPRESSION_SECONDS = 60.0
+
+HANDSHAKE_OFFER = "Zullen we elkaar een hand geven? Steekt u uw hand maar naar mij uit."
+HANDSHAKE_DONE = "Aangenaam kennis te maken! Wat fijn dat u er bent."
+HANDSHAKE_MISSED = "Geeft niets, hoor. Een andere keer misschien."
+HANDSHAKE_SECONDS = 7.0
+HANDSHAKE_FACE_SECONDS = 20.0
+HAND_DISTANCE_METERS = 0.7
 
 
 def load_emotes(path: Path = EMOTES_FILE) -> dict[str, list[str]]:
@@ -165,6 +176,51 @@ class ActionRunner:
     def play_emote(self, name: str, steps: list[tuple[Any, ...]]) -> bool:
         return self.start(name, lambda cancel: self._run_steps(steps, cancel))
 
+    def handshake(self) -> bool:
+        return self.start("Hand geven", self._run_handshake)
+
+    def _play_gesture(self, name: str, cancel: threading.Event) -> None:
+        gesture = GESTURES[name]
+        if gesture in self.robot.get_available_gestures() and not cancel.is_set():
+            self.robot.play_gesture(gesture)
+
+    def _run_handshake(self, cancel: threading.Event) -> None:
+        self.social.set_expression("happy", HANDSHAKE_FACE_SECONDS)
+        try:
+            self.speak(HANDSHAKE_OFFER, should_continue=lambda: not cancel.is_set())
+            if cancel.is_set():
+                return
+            arm = threading.Thread(
+                target=self._play_gesture,
+                args=("greet", cancel),
+                name="ari-handshake-arm",
+                daemon=True,
+            )
+            arm.start()
+            # Without a live laser or depth image there is nothing to check, so
+            # ARI assumes the hand was there rather than sounding let down.
+            can_see = self.social.has_capability("nearest") and self.social.snapshot().get(
+                "obstacle_sensor"
+            ) in {"laser", "depth"}
+            found = False
+            deadline = time.monotonic() + HANDSHAKE_SECONDS
+            while can_see and time.monotonic() < deadline and not cancel.is_set():
+                distance = self.social.nearest()
+                if distance is not None and distance < HAND_DISTANCE_METERS:
+                    found = True
+                    break
+                cancel.wait(0.25)
+            arm.join(timeout=8.0)
+            if cancel.is_set():
+                return
+            if found or not can_see:
+                self._play_gesture("nod", cancel)
+                self.speak(HANDSHAKE_DONE, should_continue=lambda: not cancel.is_set())
+            else:
+                self.speak(HANDSHAKE_MISSED, should_continue=lambda: not cancel.is_set())
+        finally:
+            self.social.stop_actions()
+
     def _run_steps(self, steps: list[tuple[Any, ...]], cancel: threading.Event) -> None:
         try:
             for kind, *values in steps:
@@ -194,3 +250,9 @@ class ActionRunner:
                     cancel.wait(values[0])
         finally:
             self.social.stop_actions()
+
+
+def gesture_for(name: str | None) -> Gesture | None:
+    """Map a conversation gesture name, handshake included, onto an arm motion."""
+    key = name or ""
+    return GESTURES.get(GESTURE_ALIASES.get(key, key))

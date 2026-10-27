@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import math
+import time
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
@@ -13,6 +14,7 @@ from werkzeug.serving import BaseWSGIServer, WSGIRequestHandler, make_server
 
 from ari.responses import ConversationEngine, ConversationTurn
 from ari.emotes import ActionRunner, EXPRESSIONS, GESTURES, load_emotes, parse_emote
+from ari.guardian_prompts import STAFF_ON_THE_WAY
 
 
 UI_HOST = "127.0.0.1"
@@ -39,11 +41,15 @@ class RuntimeCoordinator:
         *,
         turn_speaker: Callable[..., None] | None = None,
         speech_timing: Any = None,
+        mode: str = "companion",
+        idle_seconds: float | None = None,
     ) -> None:
         self.engine = engine
         self.robot = robot
         self.microphone_input = microphone_input
         self.social_control = social_control
+        self.mode = mode
+        self.idle_seconds = idle_seconds
         self._engine_lock = threading.RLock()
         self._state_lock = threading.RLock()
         self._tablet_lock = threading.RLock()
@@ -59,6 +65,10 @@ class RuntimeCoordinator:
         self._robot_connected = True
         self._tablet_page_sent: str | None = None
         self._volume: int | None = None
+        self._alert: dict[str, Any] | None = None
+        self._alert_count = 0
+        self._last_activity = time.monotonic()
+        self._stop_watchdog = threading.Event()
         self.actions = ActionRunner(robot, social_control, self.speak)
 
     @property
@@ -74,6 +84,12 @@ class RuntimeCoordinator:
             turn = self.engine.start()
         self._set_phase(self.engine.state["phase"])
         self.social_control.set_conversation_active(False)
+        if self.idle_seconds:
+            threading.Thread(
+                target=self._watch_idle,
+                name="ari-idle-watch",
+                daemon=True,
+            ).start()
         return turn
 
     def handle_transcript(
@@ -85,6 +101,7 @@ class RuntimeCoordinator:
         with self._state_lock:
             if generation != self._generation:
                 return None
+            self._last_activity = time.monotonic()
             if clean:
                 self._transcript.append({"speaker": "Bezoeker", "text": clean})
                 self._transcript = self._transcript[-MAX_TRANSCRIPT_ITEMS:]
@@ -108,6 +125,9 @@ class RuntimeCoordinator:
         # this method.  The initial silent Main request cannot replace speech.
         if turn_after_tablet is not turn and turn.utterances:
             return False
+        alert = getattr(turn, "alert", None)
+        if alert:
+            self._raise_alert(alert)
         farewell = "[PHASE] GOODBYE" in turn.diagnostics
         active = self.engine.state["phase"] != "STANDBY" or farewell or bool(
             turn.utterances and self.actions.busy()
@@ -169,6 +189,7 @@ class RuntimeCoordinator:
                     return False
                 self.add_transcript("ARI", utterance)
                 self._activity = "SPEAKING"
+                self._last_activity = time.monotonic()
             self.social_control.set_speaking(True)
             if not self.is_current(generation):
                 self.social_control.set_speaking(False)
@@ -176,10 +197,19 @@ class RuntimeCoordinator:
             return True
 
     def end_speaking(self, generation: int) -> None:
+        with self._state_lock:
+            self._last_activity = time.monotonic()
         with self._control_lock:
             self.social_control.set_speaking(False)
         if self.is_current(generation):
             self.set_activity("LISTENING")
+
+    def show_utterance_face(self, action: dict[str, Any], seconds: float) -> None:
+        """The face the conversation picked for one line, held while it is spoken."""
+        expression = (action or {}).get("expression")
+        if expression:
+            with self._control_lock:
+                self.social_control.set_expression(expression, seconds)
 
     def begin_listening(self) -> None:
         self.set_activity("LISTENING")
@@ -211,6 +241,7 @@ class RuntimeCoordinator:
                     should_continue=allowed,
                     on_speech_start=lambda text: self.begin_speaking(text, generation),
                     on_speech_end=lambda: self.end_speaking(generation),
+                    on_utterance_face=self.show_utterance_face,
                 )
             else:
                 # Hardware-free integrations can use the runtime without the
@@ -259,6 +290,42 @@ class RuntimeCoordinator:
         finally:
             ready.set()
         return True
+
+    def _raise_alert(self, alert: dict[str, Any]) -> None:
+        """Record a request for a person, for the operator page to show."""
+        with self._state_lock:
+            self._alert_count += 1
+            self._alert = {
+                "id": self._alert_count,
+                "kind": alert.get("kind", "help"),
+                "note": alert.get("note") or "",
+                "place": alert.get("place"),
+                "time": time.strftime("%H:%M"),
+            }
+            note, kind, place = self._alert["note"], self._alert["kind"], self._alert["place"]
+        print(f"[ARI ALERT] {kind}: {note}" + (f" ({place})" if place else ""))
+
+    def ack_alert(self, speak: bool = True) -> bool:
+        """Clear the alert and let ARI tell the visitor that someone is coming."""
+        with self._state_lock:
+            had_alert = self._alert is not None
+            self._alert = None
+        if had_alert and speak:
+            self._start_operator(
+                "Melding bevestigen",
+                lambda generation, cancel: self.deliver_turn(
+                    ConversationTurn((STAFF_ON_THE_WAY,)),
+                    generation,
+                    should_continue=lambda: not cancel.is_set(),
+                ),
+            )
+        return had_alert
+
+    def handshake(self) -> tuple[bool, str | None]:
+        ok = self._start_operator(
+            "Hand geven", lambda _generation, cancel: self.actions._run_handshake(cancel)
+        )
+        return ok, None if ok else "ARI is nog bezig met een operatoractie."
 
     def operator_say(self, text: str) -> bool:
         clean = " ".join(text.split())
@@ -383,6 +450,8 @@ class RuntimeCoordinator:
             self._phase = "STANDBY"
             self._activity = "LISTENING"
             self._transcript = []
+            self._alert = None
+            self._last_activity = time.monotonic()
 
         cancel = getattr(self.microphone_input, "cancel_pending", None)
         if cancel is not None:
@@ -406,6 +475,36 @@ class RuntimeCoordinator:
         with self._engine_lock:
             self.engine.reset_to_standby()
 
+    def _watch_idle(self) -> None:
+        while not self._stop_watchdog.wait(1.0):
+            with self._state_lock:
+                quiet = time.monotonic() - self._last_activity
+                busy = self._activity != "LISTENING" or self._phase == "STANDBY"
+            if busy or self.actions.busy() or quiet < self.idle_seconds:
+                continue
+            print(f"[ARI] No one spoke for {self.idle_seconds:.0f} s; back to standby.")
+            self._idle_reset()
+
+    def _idle_reset(self) -> None:
+        # Unlike the operator's reset this keeps the transcript and lets a
+        # running emote finish; it only forgets the visitor.
+        with self._state_lock:
+            self._generation += 1
+            self._phase = "STANDBY"
+            self._activity = "LISTENING"
+            self._last_activity = time.monotonic()
+        cancel = getattr(self.microphone_input, "cancel_pending", None)
+        if cancel is not None:
+            cancel()
+        self.social_control.set_conversation_active(False)
+        with self._engine_lock:
+            self.engine.reset_to_standby()
+        self._set_phase("STANDBY")
+        self.add_transcript("", "Niemand meer aan het woord: terug naar standby.")
+
+    def close(self) -> None:
+        self._stop_watchdog.set()
+
     def move(self, action: str) -> bool:
         social = self.social_control.snapshot()
         if social.get("robot_connected") is False:
@@ -426,6 +525,8 @@ class RuntimeCoordinator:
                 "activity": self._activity,
                 "transcript": list(self._transcript),
                 "generation": self._generation,
+                "mode": self.mode,
+                "alert": dict(self._alert) if self._alert else None,
             }
         social = self.social_control.snapshot()
         robot_connected = social.get("robot_connected", self._robot_connected)
@@ -539,6 +640,18 @@ def create_app(runtime: RuntimeCoordinator) -> Flask:
             return jsonify({"ok": False, "error": "Gebruik tekst voor de emote."}), 400
         ok, error = runtime.play_emote(name, script)
         return jsonify({"ok": ok, "error": error}), 200 if ok else 400
+
+    @app.post("/handshake")
+    def handshake() -> Any:
+        ok, error = runtime.handshake()
+        return jsonify({"ok": ok, "error": error}), 200 if ok else 409
+
+    @app.post("/alert/ack")
+    def ack_alert() -> Any:
+        speak = request.get_json().get("speak", True)
+        if not isinstance(speak, bool):
+            return jsonify({"ok": False, "error": "Gebruik true of false voor speak."}), 400
+        return jsonify({"ok": runtime.ack_alert(speak)})
 
     @app.post("/stop")
     def stop() -> Any:

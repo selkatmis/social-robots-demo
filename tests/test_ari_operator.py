@@ -7,6 +7,8 @@ import unittest
 from unittest.mock import patch
 
 from ari.ari_mic_test import ListeningCancelled, MicrophoneInput, run_conversation, speak_turn
+from ari.emotes import HANDSHAKE_DONE, HANDSHAKE_OFFER
+from ari.guardian_prompts import STAFF_ON_THE_WAY
 from ari.difference_game import DifferenceInterpretation
 from ari.difference_game_data import REFERENCE_DIFFERENCES
 from ari.operator_ui import RuntimeCoordinator, create_app
@@ -87,6 +89,9 @@ class Social:
     def move(self, action):
         self.moves.append(action)
         return True
+
+    def has_capability(self, name):
+        return False
 
 
 def make_runtime(robot=None, engine=None):
@@ -267,8 +272,33 @@ class OperatorTests(unittest.TestCase):
         self.assertTrue(client.post("/expression", json={"name": "neutral"}).get_json()["ok"])
         self.assertEqual(client.post("/volume", json={"percent": 65}).get_json()["percent"], 65)
         self.assertTrue(client.post("/stop", json={}).get_json()["ok"])
-        for path in ("/handshake", "/alert/ack", "/guardian", "/mode"):
+        self.assertEqual(client.post("/alert/ack", json={"speak": "yes"}).status_code, 400)
+        # The conversation mode is chosen at launch, never over HTTP.
+        for path in ("/guardian", "/mode"):
             self.assertEqual(client.post(path, json={}).status_code, 404)
+
+    def test_handshake_offers_a_hand_and_thanks_without_a_hand_sensor(self):
+        robot = Robot()
+        runtime = make_runtime(robot)
+        client = create_app(runtime).test_client()
+        self.assertTrue(client.post("/handshake", json={}).get_json()["ok"])
+        self.finish_action(runtime)
+        self.assertEqual(robot.spoken, [HANDSHAKE_OFFER, HANDSHAKE_DONE])
+        self.assertIn(Gesture.NOD, robot.gestures)
+
+    def test_staff_alert_is_shown_until_acknowledged_once(self):
+        robot = Robot()
+        runtime = make_runtime(robot)
+        client = create_app(runtime).test_client()
+        self.assertFalse(client.post("/alert/ack", json={}).get_json()["ok"])
+        runtime._raise_alert({"kind": "escort", "note": "Wil naar de apotheek", "place": "hal"})
+        alert = client.get("/state").get_json()["alert"]
+        self.assertEqual((alert["kind"], alert["place"]), ("escort", "hal"))
+        self.assertTrue(client.post("/alert/ack", json={}).get_json()["ok"])
+        self.finish_action(runtime)
+        self.assertIsNone(client.get("/state").get_json()["alert"])
+        self.assertEqual(robot.spoken, [STAFF_ON_THE_WAY])
+        self.assertFalse(client.post("/alert/ack", json={}).get_json()["ok"])
 
 
 if __name__ == "__main__":

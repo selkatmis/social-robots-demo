@@ -31,7 +31,7 @@ $RemoteVenv = "/home/pal/robond-venv"
 $RemoteSidecar = "/home/pal/ari_social_proxy.py"
 $RemoteRoboBondLog = "/tmp/ari-robond-proxy.log"
 $RemoteSidecarLog = "/tmp/ari-social-proxy.log"
-$ExpectedSidecarVersion = "ari-social-v0.4.1-operator-emotes"
+$ExpectedSidecarVersion = "ari-social-v0.4.2-guardian-operator-emotes"
 
 $SshConnectTimeoutSeconds = 10
 $StartupTimeoutSeconds = 45

@@ -19,7 +19,7 @@ $RemoteNewFile = "/home/pal/ari_social_proxy.new.py"
 $RemoteBackupFile = "/home/pal/ari_social_proxy.py.bak"
 $RemoteLogFile = "/tmp/ari-social-proxy.log"
 $SocialControlPort = 7343
-$ExpectedSidecarVersion = "ari-social-v0.4.1-operator-emotes"
+$ExpectedSidecarVersion = "ari-social-v0.4.2-guardian-operator-emotes"
 $ExpectedSmileSeconds = 2.0
 
 $SshConnectTimeoutSeconds = 10

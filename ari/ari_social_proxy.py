@@ -26,7 +26,7 @@ from flask import Flask, jsonify, request
 # Adjustable behavior and safety parameters.
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 7343
-SIDECAR_VERSION = "ari-social-v0.4.1-operator-emotes"
+SIDECAR_VERSION = "ari-social-v0.4.2-guardian-operator-emotes"
 ATTENTION_SERVICE = "/attention_manager/set_policy"
 ENABLE_NECK_SERVICE = "/gaze_manager/enable_neck"
 DISABLE_NECK_SERVICE = "/gaze_manager/disable_neck"
@@ -66,6 +66,7 @@ DEPTH_MAX_VALID_METERS = 10.0
 DEPTH_CHECK_PERIOD_SECONDS = 0.1
 FORWARD_CLEARANCE_METERS = 0.45
 FORWARD_CONE_DEGREES = 20.0
+NEAREST_CONE_DEGREES = 25.0
 MAX_FORWARD_METERS_PER_SECOND = 0.18
 MAX_BACKWARD_METERS_PER_SECOND = 0.13
 MAX_ANGULAR_RADIANS_PER_SECOND = 0.5
@@ -886,6 +887,62 @@ class ARISocialROSBridge:
         )
         return self._depth_clear
 
+    def _laser_nearest(self) -> float | None:
+        nearest = None
+        for index, distance in enumerate(self._scan.ranges):
+            angle = self._scan.angle_min + index * self._scan.angle_increment
+            if abs(math.degrees(angle)) > NEAREST_CONE_DEGREES:
+                continue
+            if not math.isfinite(distance) or distance <= 0.0:
+                continue
+            if nearest is None or distance < nearest:
+                nearest = distance
+        return nearest
+
+    def _depth_nearest(self) -> float | None:
+        message = self._depth
+        np = self._numpy
+        if message is None or np is None:
+            return None
+        if message.encoding in ("16UC1", "mono16"):
+            dtype, scale = np.uint16, 0.001
+        elif message.encoding == "32FC1":
+            dtype, scale = np.float32, 1.0
+        else:
+            return None
+        if message.is_bigendian:
+            dtype = np.dtype(dtype).newbyteorder(">")
+        try:
+            row_width = message.step // np.dtype(dtype).itemsize
+            image = np.frombuffer(message.data, dtype=dtype).reshape(
+                message.height,
+                row_width,
+            )
+            image = image[:, : message.width].astype(np.float32) * scale
+        except (TypeError, ValueError):
+            return None
+        top = int(message.height * DEPTH_BAND_TOP_FRACTION)
+        bottom = int(message.height * DEPTH_BAND_BOTTOM_FRACTION)
+        half_cone = int(message.width * NEAREST_CONE_DEGREES / DEPTH_FOV_DEGREES)
+        center = message.width // 2
+        band = image[top:bottom, max(0, center - half_cone) : center + half_cone]
+        values = band[
+            np.isfinite(band)
+            & (band > DEPTH_MIN_VALID_METERS)
+            & (band < DEPTH_MAX_VALID_METERS)
+        ]
+        return float(np.min(values)) if values.size else None
+
+    def nearest_ahead(self) -> tuple[float | None, str]:
+        """Closest thing in front of ARI, used to notice a hand for a handshake."""
+        now = time.monotonic()
+        with self._lock:
+            if self._scan_is_fresh(now):
+                return self._laser_nearest(), "laser"
+            if self._numpy is not None and self._depth_is_fresh(now):
+                return self._depth_nearest(), "depth"
+        return None, "none"
+
     def _forward_clear(self, now: float) -> bool | None:
         if self._scan_is_fresh(now):
             return self._laser_forward_clear()
@@ -1258,7 +1315,7 @@ class ARISocialROSBridge:
                 "manual_head": self._manual_head,
                 "motion_active": self._motion_kind,
                 "music_playing": self._music.playing,
-                "capabilities": ["expression_override", "turn", "drive", "music", "volume", "stop_actions"]
+                "capabilities": ["expression_override", "turn", "drive", "music", "volume", "stop_actions", "nearest"]
                 + (["head"] if self._head_pub is not None and self._disable_neck_service is not None and self._head_pub.get_num_connections() > 0 else []),
             }
 
@@ -1403,6 +1460,11 @@ def create_app(bridge: Any) -> Flask:
     def stop_actions() -> Any:
         bridge.stop_actions()
         return jsonify({"ok": True})
+
+    @app.route("/nearest", methods=["GET"])
+    def nearest() -> Any:
+        distance, sensor = bridge.nearest_ahead()
+        return jsonify({"ok": True, "distance": distance, "sensor": sensor})
 
     return app
 

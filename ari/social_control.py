@@ -278,6 +278,14 @@ class ARISocialClient:
             data = self._action("/volume", {"percent": percent})
         return data.get("percent") if data else None
 
+    def nearest(self) -> float | None:
+        """Distance to the closest thing ahead, used to notice an offered hand."""
+        if not self.has_capability("nearest"):
+            return None
+        data = self._action("/nearest", method="get", timeout=1.5)
+        distance = data.get("distance") if data else None
+        return float(distance) if isinstance(distance, (int, float)) else None
+
     def stop_actions(self) -> None:
         if self.has_capability("stop_actions"):
             self._action("/actions/stop")
