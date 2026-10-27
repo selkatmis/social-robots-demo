@@ -113,30 +113,59 @@ The persona and rules are in `SYSTEM_PROMPT` at the top of `furhat/furhat.py`.
 
 ## 3. Robot hub: everything from an iPad
 
-The hub is one page with a button per robot (ARI, QT, Furhat) that starts or
+The hub is one page with a card per robot (ARI, QT, Furhat) that starts or
 stops its demo with one tap, plus everything to drive ARI: the conversation
 as it happens, staff alerts, faces, gestures, a handshake, the dance and other
 emotes, typed lines for ARI to say, the arrow pad and volume.
 
-On the demo laptop, double-click `start_hub.bat`, or from the project root:
+On **every** demo laptop that runs a robot, double-click `start_hub.bat`, or
+from the project root:
 
 ```powershell
 python -m hub
 ```
 
 It prints the address to open on the iPad, for example
-`http://192.168.1.20:8080`. The iPad must be on the same wifi as the laptop.
+`http://192.168.1.20:8080`. The iPad must be on the same wifi as the laptops.
 In Safari, tap Share and **Add to Home Screen** to open it full screen like an
-app. Windows asks once to let Python through the firewall; allow it for
-private networks.
+app. Windows asks once to let Python through the firewall; allow it. The hub
+uses TCP port 8080 and UDP port 47820, and the venue wifi must be set to a
+private network in Windows, or the iPad and the other laptops can't reach it.
 
-Each robot runs exactly as when you start it by hand: ARI and QT through their
-start scripts, Furhat with `python -m furhat.furhat_test`. Stopping from the
-iPad is the same as pressing Ctrl+C in its window, so the robots still shut
-down cleanly. Ctrl+C in the hub's own window stops the hub and every robot it
-started. The **Log** button on a card shows that robot's output.
+**Several laptops.** The hubs find each other on the wifi by themselves, so
+the iPad can open any one of them and still sees all three robots. Each card
+says on which laptop its robot runs, and a tap goes to the hub on that laptop.
+For a robot that is off, the card shows the laptops to pick from before you
+tap Start. Pull the same branch on every laptop. If the wifi blocks the
+search, give one laptop the address of another in `shared/.env`:
+
+```text
+HUB_PEERS=192.168.1.21
+```
+
+or start it with `start_hub.bat --peer 192.168.1.21`. The other side learns
+about it from there. `--name` sets the laptop's name on the page.
+
+**Robots started by hand.** A hub also sees a demo someone started on its
+laptop without the hub, such as `start_ari_demo.ps1`, `start_qt_demo.ps1` or
+`python -m furhat.furhat_test`. Its card says *met de hand gestart*, ARI can
+be driven from the iPad as usual, and **Stop** sends Ctrl+C to that demo's own
+window, so its shutdown runs just like pressing it there. Tapping Stop again
+while it is still stopping forces it closed. The hub refuses to start a robot
+that already runs on any laptop, because two copies would fight over it.
+
+Each robot the hub starts itself runs exactly as when you start it by hand:
+ARI and QT through their start scripts, Furhat with
+`python -m furhat.furhat_test`. Ctrl+C in the hub's own window stops the hub
+and every robot it started. The **Log** button on a card shows that robot's
+output; for a robot started by hand, its output stays in its own window.
 
 ARI's card has a switch between **Gids VUmc** (the guide, default) and
 **Gesprek** (the open conversation demo). The first time ARI starts after this
 update, its card offers **Sidecar bijwerken**, which runs
 `ari\ari_save_social.ps1` for you; then press **Start ARI** again.
+
+Driving ARI: hold an arrow and ARI moves until you let go. The sidecar stops
+the base by itself 0.6 seconds after the last command, so a dropped wifi link
+can't leave it driving, and a command that arrives late is thrown away. The
+big **STOP** stops driving, dancing, music and speech.

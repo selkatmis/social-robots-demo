@@ -48,6 +48,11 @@ main { padding: 14px 18px 24px; display: flex; flex-direction: column; gap: 14px
 .dot.busy { animation: blink .8s infinite alternate; background: #000; }
 .dot.bad { background: repeating-linear-gradient(45deg, #000 0 3px, #fff 3px 6px); }
 @keyframes blink { from { opacity: .15; } to { opacity: 1; } }
+.card .where { font-size: 14px; font-weight: 500; }
+.card .where:empty, .laptops:empty { display: none; }
+.laptops { display: flex; flex-wrap: wrap; gap: 6px; }
+.laptops button { font-size: 13px; padding: 5px 10px; border-width: 2px; border-radius: 999px; }
+.laptops button.on { background: #000; color: #fff; }
 .card .detail { font-size: 13px; opacity: .6; height: 17px; overflow: hidden; line-height: 17px; white-space: nowrap; text-overflow: ellipsis; }
 .card .actions { display: flex; gap: 8px; align-items: stretch; margin-top: auto; }
 .card .actions .go { flex: 1; font-size: 18px; font-weight: 700; padding: 11px 8px; }
@@ -100,6 +105,10 @@ details textarea { margin-top: 6px; font-size: 14px; resize: vertical; }
 .pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; touch-action: none; }
 .pad button { touch-action: none; font-size: 28px; padding: 0; height: 66px; border-radius: 16px; }
 .pad button.held { background: #000; color: #fff; }
+.pad svg { display: block; width: 30px; height: 30px; margin: auto; fill: currentColor; pointer-events: none; }
+.pad .right { transform: rotate(90deg); }
+.pad .down { transform: rotate(180deg); }
+.pad .left { transform: rotate(-90deg); }
 #stopAll { background: #000; color: #fff; font-size: 28px; font-weight: 700; letter-spacing: 5px; padding: 18px; border-radius: 18px; }
 .hint { font-size: 13px; opacity: .6; line-height: 1.35; }
 .volume { display: flex; align-items: center; gap: 10px; }
@@ -191,11 +200,11 @@ details textarea { margin-top: 6px; font-size: 14px; resize: vertical; }
       <div class="col">
         <h2>Rijden</h2>
         <div class="pad">
-          <span></span><button data-move="forward" aria-label="Vooruit">&#9650;</button><span></span>
-          <button data-move="left" aria-label="Links draaien">&#9664;</button>
-          <button data-move="stop" aria-label="Stil staan">&#9632;</button>
-          <button data-move="right" aria-label="Rechts draaien">&#9654;</button>
-          <span></span><button data-move="back" aria-label="Achteruit">&#9660;</button><span></span>
+          <span></span><button data-move="forward" aria-label="Vooruit"><svg class="up" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 21 20H3z"/></svg></button><span></span>
+          <button data-move="left" aria-label="Links draaien"><svg class="left" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 21 20H3z"/></svg></button>
+          <button data-move="stop" aria-label="Stil staan"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg></button>
+          <button data-move="right" aria-label="Rechts draaien"><svg class="right" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 21 20H3z"/></svg></button>
+          <span></span><button data-move="back" aria-label="Achteruit"><svg class="down" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 21 20H3z"/></svg></button><span></span>
         </div>
         <div class="hint" id="moveHint">Houd een pijl ingedrukt om te rijden. Loslaten stopt.</div>
       </div>
@@ -223,7 +232,7 @@ const PHRASES = [['Welkom', 'Goedendag, welkom bij onze stand!'], ['Momentje', '
 const PHASES = {STANDBY:'Standby', HELP:'Helpt', ANYTHING_ELSE:'Nog iets?', GOODBYE:'Afscheid',
   INVITATION:'Uitnodiging', ASK_NAME:'Naam', CONVERSATION:'Gesprek', CONTINUE_CHECK:'Verder?'};
 const ACTIVITY = {LISTENING:'Luistert', SPEAKING:'Praat', THINKING:'Denkt na'};
-const STATUS = {off:'Uit', starting:'Starten...', running:'Draait', stopping:'Stoppen...', error:'Fout', external:'Draait (buiten de hub)'};
+const STATUS = {off:'Uit', starting:'Starten...', running:'Draait', stopping:'Stoppen...', error:'Fout', external:'Draait (met de hand gestart)'};
 const ALERTS = {help:'HULP GEVRAAGD', escort:'BEGELEIDING GEVRAAGD', urgent:'SPOED'};
 
 let state = null;
@@ -231,6 +240,8 @@ let ari = null;
 let lastTranscript = '';
 let volumeTouched = 0;
 let modeChoice = localStorage.getItem('ariMode') || 'guardian';
+let startOn = {};
+try { startOn = JSON.parse(localStorage.getItem('startOn') || '{}') || {}; } catch (_) {}
 const $ = id => document.getElementById(id);
 
 function toast(text) {
@@ -251,6 +262,15 @@ async function api(path, body, method) {
   }
 }
 const ariApi = (action, body) => api('/api/ari/' + action, body);
+const hubs = () => (state && state.hubs) || [];
+const hubName = id => { const hub = hubs().find(item => item.id === id); return hub ? hub.name : ''; };
+
+// The laptop a robot that is off starts on: the one picked on its card, by
+// name because a hub gets a new id every time it starts, or else where it ran last.
+function startHub(robot) {
+  const picked = hubs().find(hub => hub.name === startOn[robot.key]);
+  return picked ? picked.id : robot.hub;
+}
 
 function buildRobots() {
   const holder = $('robots');
@@ -260,7 +280,9 @@ function buildRobots() {
     card.innerHTML = `
       <div class="top"><span class="name"></span><span class="role"></span></div>
       <div class="state"><span class="dot"></span><span class="status"></span><span class="uptime" style="opacity:.6;font-size:14px"></span></div>
+      <div class="where"></div>
       <div class="detail"></div>
+      <div class="laptops"></div>
       <div class="actions">${key === 'ari' ? `<div class="seg"><button data-mode="guardian">Gids VUmc</button><button data-mode="companion">Gesprek</button></div>` : ''}<button class="go solid"></button><button class="small" data-log>Log</button></div>`;
     card.querySelector('.go').addEventListener('click', () => toggleRobot(key));
     card.querySelector('[data-log]').addEventListener('click', () => showLog(key));
@@ -276,13 +298,14 @@ async function toggleRobot(key) {
   const button = $('card-' + key).querySelector('.go');
   button.disabled = true;
   if (key === 'ari' && robot.hint === 'update' && !robot.running) {
-    const result = await api('/api/robots/ari_update/start');
+    const result = await api('/api/robots/ari_update/start', {hub: robot.hub});
     if (result.ok) toast('De nieuwe sidecar gaat naar ARI...');
   } else if (robot.running) {
-    await api(`/api/robots/${key}/stop`);
+    await api(`/api/robots/${key}/stop`, {hub: robot.hub});
   } else {
-    const result = await api(`/api/robots/${key}/start`, key === 'ari' ? {mode: modeChoice} : {});
-    if (result.ok) toast(`${robot.name} wordt gestart...`);
+    const hub = startHub(robot);
+    const result = await api(`/api/robots/${key}/start`, key === 'ari' ? {mode: modeChoice, hub} : {hub});
+    if (result.ok) toast(`${robot.name} wordt gestart` + (hubs().length > 1 ? ` op ${hubName(hub)}` : '') + '...');
   }
   setTimeout(refresh, 300);
 }
@@ -290,9 +313,9 @@ async function toggleRobot(key) {
 async function showLog(key) {
   const update = state && state.robots.find(item => item.key === 'ari_update');
   if (key === 'ari' && update && (update.running || update.status === 'error')) key = 'ari_update';
-  const data = await api(`/api/robots/${key}/log`, null, 'GET');
   const robot = state && state.robots.find(item => item.key === key);
-  $('modalTitle').textContent = 'Log · ' + (robot ? robot.name : key);
+  const data = await api(`/api/robots/${key}/log?hub=${encodeURIComponent(robot ? robot.hub : '')}`, null, 'GET');
+  $('modalTitle').textContent = 'Log · ' + (robot ? robot.name : key) + (robot && hubs().length > 1 ? ' · ' + robot.hub_name : '');
   $('modalText').textContent = (data.lines || []).join('\n') || 'Nog geen uitvoer.';
   $('modal').classList.add('show');
   const pre = $('modalText'); pre.scrollTop = pre.scrollHeight;
@@ -300,8 +323,30 @@ async function showLog(key) {
 $('modalClose').addEventListener('click', () => $('modal').classList.remove('show'));
 $('modal').addEventListener('click', event => { if (event.target === $('modal')) $('modal').classList.remove('show'); });
 
+function renderLaptops(card, robot) {
+  const holder = card.querySelector('.laptops');
+  const list = hubs();
+  const show = list.length > 1 && !robot.running;
+  const chosen = startHub(robot);
+  const signature = show ? list.map(hub => hub.id + ':' + hub.name).join('|') + '#' + chosen : '';
+  if (holder.dataset.signature === signature) return;
+  holder.dataset.signature = signature;
+  holder.replaceChildren();
+  if (!show) return;
+  for (const hub of list) {
+    const button = document.createElement('button');
+    button.textContent = hub.name + (hub.here ? ' (deze)' : '');
+    button.classList.toggle('on', hub.id === chosen);
+    button.addEventListener('click', () => {
+      startOn[robot.key] = hub.name; localStorage.setItem('startOn', JSON.stringify(startOn)); render();
+    });
+    holder.append(button);
+  }
+}
+
 function renderRobots() {
   const update = state.robots.find(item => item.key === 'ari_update');
+  const many = hubs().length > 1;
   for (const robot of state.robots) {
     const card = $('card-' + robot.key);
     if (!card) continue;
@@ -312,10 +357,17 @@ function renderRobots() {
     dot.className = 'dot' + ({running:' on', external:' on', starting:' busy', stopping:' busy', error:' bad'}[robot.status] || '');
     const minutes = robot.uptime ? Math.floor(robot.uptime / 60) : null;
     card.querySelector('.uptime').textContent = robot.running && minutes !== null ? `· ${minutes} min` : '';
-    card.querySelector('.detail').textContent = robot.status === 'external'
-      ? 'Met de hand gestart op deze laptop; stoppen kan daar met Ctrl+C.' : (robot.detail || '');
+    card.querySelector('.where').textContent = robot.running && (many || !robot.here)
+      ? 'Op ' + robot.hub_name + (robot.here ? ' (deze laptop)' : '') : '';
+    let detail = robot.detail || '';
+    if (robot.by_hand) detail = robot.can_stop
+      ? 'Met de hand gestart. Stop werkt als Ctrl+C in dat venster.'
+      : 'Met de hand gestart. Stop het in zijn eigen venster met Ctrl+C.';
+    if (robot.also && robot.also.length) detail = 'Let op: draait ook op ' + robot.also.join(', ') + '.';
+    card.querySelector('.detail').textContent = detail;
+    renderLaptops(card, robot);
     const go = card.querySelector('.go');
-    go.disabled = robot.status === 'external';
+    go.disabled = robot.running && !robot.can_stop;
     go.textContent = robot.running ? (robot.status === 'stopping' ? 'Toch stoppen' : 'Stop ' + robot.name) : 'Start ' + robot.name;
     go.classList.toggle('solid', !robot.running);
     if (robot.key === 'ari' && !robot.running && update && (update.running || update.status === 'error')) {
@@ -332,7 +384,7 @@ function renderRobots() {
     for (const button of card.querySelectorAll('[data-mode]')) {
       const active = ari && robot.key === 'ari' ? ari.mode === button.dataset.mode : modeChoice === button.dataset.mode;
       button.classList.toggle('on', active);
-      button.disabled = robot.running || robot.status === 'external';
+      button.disabled = robot.running;
     }
   }
 }
@@ -377,6 +429,7 @@ function renderAri() {
     return;
   }
   chips.append(chip(ari.mode === 'guardian' ? 'Gids VUmc' : 'Gesprek', true));
+  if (state.ari_hub && (hubs().length > 1 || !state.ari_hub.here)) chips.append(chip('Op ' + state.ari_hub.name));
   chips.append(chip(PHASES[ari.phase] || ari.phase));
   chips.append(chip(ACTIVITY[ari.activity] || ari.activity, ari.activity === 'SPEAKING'));
   if (ari.face_count) chips.append(chip(ari.face_count === 1 ? '1 gezicht' : ari.face_count + ' gezichten'));
@@ -435,9 +488,13 @@ async function refresh() {
     state = await response.json();
     const hadAri = !!ari;
     ari = state.ari;
-    $('link').className = 'ok'; $('linkText').textContent = 'verbonden';
+    const laptops = hubs();
+    $('link').className = 'ok';
+    $('linkText').textContent = laptops.length > 1 ? `verbonden · ${laptops.length} laptops` : 'verbonden';
     $('clock').textContent = state.time;
-    if (state.urls && state.urls.length) $('address').textContent = 'Open op de iPad: ' + state.urls.join('  ·  ');
+    const names = laptops.map(hub => hub.name + (hub.here ? ' (deze)' : '')).join(', ');
+    $('address').textContent = (state.urls && state.urls.length ? 'Open op de iPad: ' + state.urls.join('  ·  ') + '  ·  ' : '')
+      + (laptops.length > 1 ? 'Laptops: ' + names : 'Andere laptops verschijnen hier zodra hun hub draait.');
     if (ari && !hadAri) loadVolume();
     render();
   } catch (error) {
@@ -498,8 +555,12 @@ function buildControls() {
 let moveTimer = null;
 let heldAction = null;
 let heldButton = null;
+// Each drive command is numbered so the hub can drop one that arrives late,
+// after a newer one such as the stop on release.
+const moveClient = Math.random().toString(36).slice(2, 12);
+let moveSeq = 0;
 function sendMove(action) { return fetch('/api/ari/move', {method: 'POST', headers: {'Content-Type': 'application/json'},
-  body: JSON.stringify({action})}).catch(() => {}); }
+  body: JSON.stringify({action, client: moveClient, seq: ++moveSeq})}).catch(() => {}); }
 function startMove(action, button) {
   if (action === 'stop') { stopMove(); return; }
   if (heldAction === action) return;
