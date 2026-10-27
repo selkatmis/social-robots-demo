@@ -410,7 +410,7 @@ class GuardianEngine:
             try:
                 raw = self.llm.prompt(
                     prompt + extra,
-                    max_tokens=220,
+                    max_tokens=320,
                     temperature=0.3 if attempt == 0 else 0.0,
                 )
             except Exception:
